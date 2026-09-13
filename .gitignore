@@ -3,4 +3,5 @@ __pycache__/
 .vscode/
 *.pyc
 *.pyo
-*.pyd   
+*.pyd
+*.egg-info/
