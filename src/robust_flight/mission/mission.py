@@ -7,7 +7,7 @@ class Mission:
         self.current_waypoint_index = 0
         
     def current_waypoint(self):
-        if self.current_waypoint_index < len(self.waypoints.points):
+        if self.current_waypoint_index is not None and self.current_waypoint_index < len(self.waypoints.points):
             return self.waypoints.points[self.current_waypoint_index]
         return None
         
