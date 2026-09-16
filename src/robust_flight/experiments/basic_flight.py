@@ -7,6 +7,18 @@ from robust_flight.dynamics.aircraft import Aircraft
 from robust_flight.mission.mission import Mission
 from robust_flight.simulation.engine import simulate
 
+# simulation parameters
+duration = 10.0
+dt = 0.1
+
+# guidance parameters
+max_speed = 20.0
+max_deceleration = 2.0
+
+# controller gains
+heading_kp = 2.0
+speed_kp = 2.0
+
 # initial state
 state = np.array([0.0, 0.0, 10.0, 0.0])
 
@@ -18,8 +30,8 @@ waypoint = np.array([50.0, 30.0])
 mission = Mission([waypoint])
 
 # create the heading and speed controllers
-heading_controller = HeadingController(kp=2.0)
-speed_controller = SpeedController(kp=0.5)
+heading_controller = HeadingController(kp=heading_kp)
+speed_controller = SpeedController(kp=speed_kp)
 
 
 def control_function(state):
@@ -33,7 +45,7 @@ def control_function(state):
     heading_error = mission.waypoints.heading_error(state[3], desired_heading)
 
     desired_speed = mission.waypoints.desired_speed(
-        state[:2], waypoint, max_speed=20.0, max_deceleration=2.0
+        state[:2], waypoint, max_speed, max_deceleration
     )
 
     speed_error = desired_speed - state[2]
@@ -50,7 +62,7 @@ def termination_condition(state):
     return mission.is_mission_complete()
 
 
-history = simulate(aircraft, control_function, 10.0, 0.1, termination_condition)
+history = simulate(aircraft, control_function, duration, dt, termination_condition)
 
 # check metrics
 final_position = history[-1, :2]
@@ -59,39 +71,44 @@ final_speed = history[-1, 2]
 final_desired_speed = mission.waypoints.desired_speed(
     final_position,
     waypoint,
-    max_speed=20.0,
-    max_deceleration=2.0,
+    max_speed,
+    max_deceleration,
 )
 distances = np.linalg.norm(history[:, :2] - waypoint, axis=1)
 desired_speeds = np.array([
     mission.waypoints.desired_speed(
         position,
         waypoint,
-        max_speed=20.0,
-        max_deceleration=2.0,
+        max_speed,
+        max_deceleration,
     )
     for position in history[:, :2]
 ])
+
+speed_errors = desired_speeds - history[:, 2]
+speed_rmse = np.sqrt(np.mean(speed_errors**2))
 minimum_distance = np.min(distances)
-accelerations = np.diff(history[:, 2]) / 0.1
+accelerations = np.diff(history[:, 2]) / dt
 min_acceleration = np.min(accelerations)
 max_acceleration = np.max(accelerations)
-final_time = (len(history) - 1) * 0.1
+final_time = (len(history) - 1) * dt
 
 print(
-    f"Final position: {final_position}, speed: {final_speed:.3f} m/s, "
-    f"Minimum distance to waypoint: {minimum_distance:.3f} m, "
-    f"distance to waypoint: {final_distance:.3f} m, "
-    f"desired speed: {final_desired_speed:.3f} m/s, "
-    f"max deceleration: {min_acceleration:.3f} m/s², "
-    f"max acceleration: {max_acceleration:.3f} m/s², "
-    f"final time: {final_time:.3f} s"
+    f"Final position: {final_position}, \n"
+    f"speed: {final_speed:.3f} m/s, \n"
+    f"Minimum distance to waypoint: {minimum_distance:.3f} m, \n"
+    f"distance to waypoint: {final_distance:.3f} m, \n"
+    f"desired speed: {final_desired_speed:.3f} m/s, \n"
+    f"max deceleration: {min_acceleration:.3f} m/s², \n"
+    f"max acceleration: {max_acceleration:.3f} m/s², \n"
+    f"final time: {final_time:.3f} s, \n"
+    f"speed tracking RMSE: {speed_rmse:.3f} m/s, \n"
 )
 
 x = history[:, 0]
 y = history[:, 1]
 v = history[:, 2]
-time = np.arange(len(history)) * 0.1
+time = np.arange(len(history)) * dt
 
 # plot desired vs actual speed
 plt.plot(time, v, label="Actual speed")
