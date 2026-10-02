@@ -8,132 +8,270 @@ from robust_flight.dynamics.aircraft import Aircraft
 from robust_flight.mission.mission import Mission
 from robust_flight.simulation.engine import simulate
 
-# simulation parameters
-duration = 10.0
-dt = 0.1
 
-# guidance parameters
-max_speed = 20.0
-max_deceleration = 2.0
+def run_experiment(speed_kp):
+    # simulation parameters
+    duration = 10.0
+    dt = 0.1
 
-# controller gains
-heading_kp = 2.0
-speed_kp = 2.0
+    # guidance parameters
+    max_speed = 20.0
+    max_deceleration = 2.0
 
-# initial state
-state = np.array([0.0, 0.0, 10.0, 0.0])
+    # controller gains
+    heading_kp = 2.0
 
-# create an aircraft instance from the class
-aircraft = Aircraft(state)
+    # initial state
+    state = np.array([0.0, 0.0, 10.0, 0.0])
 
-# define the waypoint and create a Waypoints instance
-waypoint = np.array([50.0, 30.0])
-mission = Mission([waypoint])
+    # create an aircraft instance from the class
+    aircraft = Aircraft(state)
 
-# create the heading and speed controllers
-heading_controller = HeadingController(kp=heading_kp)
-speed_controller = SpeedController(kp=speed_kp)
+    # define the waypoint and create a Mission instance
+    waypoint = np.array([50.0, 30.0])
+    mission = Mission([waypoint])
 
-actuator = Actuator(
-    min_acceleration=-2.0,
-    max_acceleration=3.0,
-    max_turn_rate=np.pi/3
-)
+    # create the heading and speed controllers
+    heading_controller = HeadingController(kp=heading_kp)
+    speed_controller = SpeedController(kp=speed_kp)
 
-
-def control_function(state):
-    waypoint = mission.current_waypoint()
-
-    if waypoint is None:
-        return np.array([0.0, 0.0])
-
-    desired_heading = mission.waypoints.desired_heading(state[:2], waypoint)
-
-    heading_error = mission.waypoints.heading_error(state[3], desired_heading)
-
-    desired_speed = mission.waypoints.desired_speed(
-        state[:2], waypoint, max_speed, max_deceleration
+    # create the actuator model
+    actuator = Actuator(
+        min_acceleration=-2.0,
+        max_acceleration=3.0,
+        max_turn_rate=np.pi / 3,
     )
 
-    speed_error = desired_speed - state[2]
+    def control_function(state):
+        waypoint = mission.current_waypoint()
 
-    acceleration = speed_controller.control(speed_error)
+        if waypoint is None:
+            return np.array([0.0, 0.0])
 
-    heading_control = heading_controller.control(heading_error)
+        desired_heading = mission.waypoints.desired_heading(
+            state[:2],
+            waypoint,
+        )
 
-    return np.array([acceleration, heading_control])
+        heading_error = mission.waypoints.heading_error(
+            state[3],
+            desired_heading,
+        )
 
-def applied_control_function(state):
-    requested_control = control_function(state)
-    return actuator.apply(requested_control)
+        desired_speed = mission.waypoints.desired_speed(
+            state[:2],
+            waypoint,
+            max_speed,
+            max_deceleration,
+        )
 
-def termination_condition(state):
-    mission.update(state[:2])
-    return mission.is_mission_complete()
+        speed_error = desired_speed - state[2]
 
+        acceleration = speed_controller.control(speed_error)
+        heading_control = heading_controller.control(heading_error)
 
-history = simulate(
-    aircraft, applied_control_function, duration, dt, termination_condition
-)
+        return np.array([acceleration, heading_control])
 
-# check metrics
-final_position = history[-1, :2]
-final_distance = mission.waypoints.distance_to_waypoint(final_position, waypoint)
-final_speed = history[-1, 2]
-final_desired_speed = mission.waypoints.desired_speed(
-    final_position,
-    waypoint,
-    max_speed,
-    max_deceleration,
-)
-distances = np.linalg.norm(history[:, :2] - waypoint, axis=1)
-desired_speeds = np.array([
-    mission.waypoints.desired_speed(
-        position,
+    def termination_condition(state):
+        mission.update(state[:2])
+        return mission.is_mission_complete()
+
+    # run simulation
+    result = simulate(
+        aircraft,
+        control_function,
+        duration,
+        dt,
+        termination_condition,
+        actuator=actuator,
+    )
+
+    history = result.states
+
+    # calculate final-state metrics
+    final_position = history[-1, :2]
+
+    final_distance = mission.waypoints.distance_to_waypoint(
+        final_position,
+        waypoint,
+    )
+
+    final_speed = history[-1, 2]
+
+    final_desired_speed = mission.waypoints.desired_speed(
+        final_position,
         waypoint,
         max_speed,
         max_deceleration,
     )
-    for position in history[:, :2]
-])
 
-speed_errors = desired_speeds - history[:, 2]
-speed_rmse = np.sqrt(np.mean(speed_errors**2))
-minimum_distance = np.min(distances)
-accelerations = np.diff(history[:, 2]) / dt
-min_acceleration = np.min(accelerations)
-max_acceleration = np.max(accelerations)
-final_time = (len(history) - 1) * dt
+    # calculate distance to waypoint throughout the flight
+    distances = np.linalg.norm(
+        history[:, :2] - waypoint,
+        axis=1,
+    )
 
-print(
-    f"Final position: {final_position}, \n"
-    f"speed: {final_speed:.3f} m/s, \n"
-    f"Minimum distance to waypoint: {minimum_distance:.3f} m, \n"
-    f"distance to waypoint: {final_distance:.3f} m, \n"
-    f"desired speed: {final_desired_speed:.3f} m/s, \n"
-    f"max deceleration: {min_acceleration:.3f} m/s², \n"
-    f"max acceleration: {max_acceleration:.3f} m/s², \n"
-    f"final time: {final_time:.3f} s, \n"
-    f"speed tracking RMSE: {speed_rmse:.3f} m/s, \n"
-)
+    minimum_distance = np.min(distances)
 
-x = history[:, 0]
-y = history[:, 1]
-v = history[:, 2]
-time = np.arange(len(history)) * dt
+    # calculate desired speeds throughout the flight
+    desired_speeds = np.array(
+        [
+            mission.waypoints.desired_speed(
+                position,
+                waypoint,
+                max_speed,
+                max_deceleration,
+            )
+            for position in history[:, :2]
+        ]
+    )
 
-# plot desired vs actual speed
-plt.plot(time, v, label="Actual speed")
-plt.plot(time, desired_speeds, "--", label="Desired speed")
-plt.xlabel("Time (s)")
-plt.ylabel("Speed (m/s)")
-plt.title("Actual vs Desired Speed over Time")
-plt.legend()
-plt.show()
+    # calculate speed error
+    speed_errors = desired_speeds - history[:, 2]
 
-# plot trajectory
-plt.plot(x, y)
-plt.xlabel("x position (m)")
-plt.ylabel("y position (m)")
-plt.title("Aircraft Trajectory")
-plt.show()
+    speed_rmse = np.sqrt(
+        np.mean(speed_errors**2)
+    )
+
+    # calculate observed acceleration
+    accelerations = np.diff(history[:, 2]) / dt
+
+    min_acceleration = np.min(accelerations)
+    max_acceleration = np.max(accelerations)
+
+    # calculate simulation time
+    final_time = (len(history) - 1) * dt
+
+    # calculate actuator intervention
+    control_difference = (
+        result.requested_controls
+        - result.applied_controls
+    )
+
+    acceleration_intervention = np.abs(
+        control_difference[:, 0]
+    )
+
+    turn_rate_intervention = np.abs(
+        control_difference[:, 1]
+    )
+
+    max_acceleration_intervention = np.max(
+        acceleration_intervention
+    )
+
+    mean_acceleration_intervention = np.mean(
+        acceleration_intervention
+    )
+
+    max_turn_rate_intervention = np.max(
+        turn_rate_intervention
+    )
+
+    mean_turn_rate_intervention = np.mean(
+        turn_rate_intervention
+    )
+
+    # calculate actuator saturation rates
+    acceleration_saturated = (
+        result.requested_controls[:, 0]
+        != result.applied_controls[:, 0]
+    )
+
+    turn_rate_saturated = (
+        result.requested_controls[:, 1]
+        != result.applied_controls[:, 1]
+    )
+
+    acceleration_saturation_rate = np.mean(
+        acceleration_saturated
+    )
+
+    turn_rate_saturation_rate = np.mean(
+        turn_rate_saturated
+    )
+
+    # print experiment results
+    print(f"Speed controller gain: {speed_kp:.2f}")
+    print(f"Final position: {final_position}")
+    print(f"Final speed: {final_speed:.3f} m/s")
+    print(f"Final distance: {final_distance:.3f} m")
+    print(f"Minimum distance: {minimum_distance:.3f} m")
+    print(f"Final desired speed: {final_desired_speed:.3f} m/s")
+    print(f"Speed RMSE: {speed_rmse:.3f} m/s")
+    print(f"Minimum acceleration: {min_acceleration:.3f} m/s²")
+    print(f"Maximum acceleration: {max_acceleration:.3f} m/s²")
+    print(f"Final time: {final_time:.3f} s")
+    print(
+        f"Acceleration saturation rate: "
+        f"{acceleration_saturation_rate * 100:.1f}%"
+    )
+    print(
+        f"Turn-rate saturation rate: "
+        f"{turn_rate_saturation_rate * 100:.1f}%"
+    )
+    print(
+        f"Max acceleration intervention: "
+        f"{max_acceleration_intervention:.3f} m/s²"
+    )
+    print(
+        f"Mean acceleration intervention: "
+        f"{mean_acceleration_intervention:.3f} m/s²"
+    )
+    print(
+        f"Max turn-rate intervention: "
+        f"{max_turn_rate_intervention:.3f} rad/s"
+    )
+    print(
+        f"Mean turn-rate intervention: "
+        f"{mean_turn_rate_intervention:.3f} rad/s"
+    )
+
+    return result, history, desired_speeds, dt
+
+
+if __name__ == "__main__":
+    speed_kp = 2.0
+
+    result, history, desired_speeds, dt = run_experiment(speed_kp)
+
+    x = history[:, 0]
+    y = history[:, 1]
+    v = history[:, 2]
+    time = np.arange(len(history)) * dt
+
+    # plot desired vs actual speed
+    plt.figure()
+
+    plt.plot(
+        time,
+        v,
+        label="Actual speed",
+    )
+
+    plt.plot(
+        time,
+        desired_speeds,
+        "--",
+        label="Desired speed",
+    )
+
+    plt.xlabel("Time (s)")
+    plt.ylabel("Speed (m/s)")
+    plt.title("Actual vs Desired Speed over Time")
+    plt.legend()
+    plt.grid()
+
+    plt.show()
+
+    # plot trajectory
+    plt.figure()
+
+    plt.plot(x, y)
+
+    plt.xlabel("x position (m)")
+    plt.ylabel("y position (m)")
+    plt.title("Aircraft Trajectory")
+    plt.grid()
+
+    plt.show()

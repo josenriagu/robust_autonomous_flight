@@ -1,5 +1,6 @@
 import numpy as np
 
+
 class Actuator:
     """Model actuator limits for the aircraft control inputs.
     The current model assumes symmetric turn-rate authority, meaning
