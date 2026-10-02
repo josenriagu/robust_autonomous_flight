@@ -16,6 +16,8 @@ class ExperimentResult:
     simulation: object
     history: np.ndarray
     desired_speeds: np.ndarray
+    speed_errors: np.ndarray
+    max_speed_error: float
     dt: float
     speed_kp: float
     final_position: np.ndarray
@@ -158,6 +160,8 @@ def run_experiment(speed_kp):
         np.mean(speed_errors**2)
     )
 
+    max_speed_error = np.max(np.abs(speed_errors))
+
     # calculate observed acceleration
     accelerations = np.diff(history[:, 2]) / dt
 
@@ -226,6 +230,7 @@ def run_experiment(speed_kp):
     print(f"Speed RMSE: {speed_rmse:.3f} m/s")
     print(f"Minimum acceleration: {min_acceleration:.3f} m/s²")
     print(f"Maximum acceleration: {max_acceleration:.3f} m/s²")
+    print(f"Maximum speed error: {max_speed_error:.3f} m/s")
     print(f"Final time: {final_time:.3f} s")
     print(
         f"Acceleration saturation rate: "
@@ -256,6 +261,8 @@ def run_experiment(speed_kp):
         simulation=result,
         history=history,
         desired_speeds=desired_speeds,
+        speed_errors=speed_errors,
+        max_speed_error=max_speed_error,
         dt=dt,
         speed_kp=speed_kp,
         final_position=final_position,
@@ -277,7 +284,7 @@ def run_experiment(speed_kp):
 
 
 if __name__ == "__main__":
-    speed_gains = [-2.0, -1.0, -0.5, 0.0, 0.25, 0.5, 1.0, 2.0]
+    speed_gains = [0.25, 0.5, 1.0, 2.0]
 
     experiments = []
 
@@ -291,6 +298,7 @@ if __name__ == "__main__":
     print(
         f"{'Kp':>6} "
         f"{'RMSE':>10} "
+        f"{'Max Err.':>10} "
         f"{'Final Dist.':>12} "
         f"{'Accel Sat.':>12} "
         f"{'Mean Int.':>12} "
@@ -303,53 +311,60 @@ if __name__ == "__main__":
         print(
             f"{experiment.speed_kp:>6.2f} "
             f"{experiment.speed_rmse:>10.3f} "
+            f"{experiment.max_speed_error:>10.3f} "
             f"{experiment.final_distance:>12.3f} "
             f"{experiment.acceleration_saturation_rate * 100:>11.1f}% "
             f"{experiment.mean_acceleration_intervention:>12.3f} "
             f"{experiment.final_time:>10.3f}"
         )
 
-    history = experiment.history
-    desired_speeds = experiment.desired_speeds
-    dt = experiment.dt
-
-    x = experiment.history[:, 0]
-    y = experiment.history[:, 1]
-    v = experiment.history[:, 2]
-    time = np.arange(len(experiment.history)) * dt
-
-    # plot desired vs actual speed
+    # plot speed tracking for different controller gains
     plt.figure()
 
-    plt.plot(
-        time,
-        v,
-        label="Actual speed",
-    )
+    for experiment in experiments:
+        time = np.arange(len(experiment.history)) * experiment.dt
 
-    plt.plot(
-        time,
-        desired_speeds,
-        "--",
-        label="Desired speed",
-    )
+        plt.plot(
+            time,
+            experiment.history[:, 2],
+            label=f"Kp = {experiment.speed_kp:.2f} actual",
+        )
+
+        plt.plot(
+            time,
+            experiment.desired_speeds,
+            "--",
+            label=f"Kp = {experiment.speed_kp:.2f} desired",
+        )
 
     plt.xlabel("Time (s)")
     plt.ylabel("Speed (m/s)")
-    plt.title("Actual vs Desired Speed over Time")
+    plt.title("Speed Tracking for ifferent Controller Gains")
     plt.legend()
     plt.grid()
 
     plt.show()
 
-    # plot trajectory
+    # plot speed tracking errors for different controller gains
     plt.figure()
 
-    plt.plot(x, y)
+    for experiment in experiments:
+        time = np.arange(len(experiment.speed_errors)) * experiment.dt
+        
+        plt.plot(
+            time,
+            experiment.speed_errors,
+            label=f"Kp = {experiment.speed_kp:.2f}",
+        )
 
-    plt.xlabel("x position (m)")
-    plt.ylabel("y position (m)")
-    plt.title("Aircraft Trajectory")
+    plt.axhline(
+        0.0,
+        linestyle="--",
+    )
+    plt.xlabel("Time (s)")
+    plt.ylabel("Speed Error (m/s)")
+    plt.title("Speed Tracking Error for Different Controller Gains")
+    plt.legend()
     plt.grid()
 
     plt.show()
