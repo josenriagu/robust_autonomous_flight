@@ -277,9 +277,37 @@ def run_experiment(speed_kp):
 
 
 if __name__ == "__main__":
-    speed_kp = 2.0
+    speed_gains = [-2.0, -1.0, -0.5, 0.0, 0.25, 0.5, 1.0, 2.0]
 
-    experiment = run_experiment(speed_kp)
+    experiments = []
+
+    for speed_kp in speed_gains:
+        experiment = run_experiment(speed_kp)
+        experiments.append(experiment)
+
+    print("\nGain comparison")
+    print("-" * 80)
+
+    print(
+        f"{'Kp':>6} "
+        f"{'RMSE':>10} "
+        f"{'Final Dist.':>12} "
+        f"{'Accel Sat.':>12} "
+        f"{'Mean Int.':>12} "
+        f"{'Time':>10}"
+    )
+
+    print("-" * 80)
+
+    for experiment in experiments:
+        print(
+            f"{experiment.speed_kp:>6.2f} "
+            f"{experiment.speed_rmse:>10.3f} "
+            f"{experiment.final_distance:>12.3f} "
+            f"{experiment.acceleration_saturation_rate * 100:>11.1f}% "
+            f"{experiment.mean_acceleration_intervention:>12.3f} "
+            f"{experiment.final_time:>10.3f}"
+        )
 
     history = experiment.history
     desired_speeds = experiment.desired_speeds
