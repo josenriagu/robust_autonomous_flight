@@ -3,6 +3,7 @@ import numpy as np
 
 from robust_flight.control.heading import HeadingController
 from robust_flight.control.speed import SpeedController
+from robust_flight.dynamics.actuator import Actuator
 from robust_flight.dynamics.aircraft import Aircraft
 from robust_flight.mission.mission import Mission
 from robust_flight.simulation.engine import simulate
@@ -33,6 +34,12 @@ mission = Mission([waypoint])
 heading_controller = HeadingController(kp=heading_kp)
 speed_controller = SpeedController(kp=speed_kp)
 
+actuator = Actuator(
+    min_acceleration=-2.0,
+    max_acceleration=3.0,
+    max_turn_rate=np.pi/3
+)
+
 
 def control_function(state):
     waypoint = mission.current_waypoint()
@@ -56,13 +63,18 @@ def control_function(state):
 
     return np.array([acceleration, heading_control])
 
+def applied_control_function(state):
+    requested_control = control_function(state)
+    return actuator.apply(requested_control)
 
 def termination_condition(state):
     mission.update(state[:2])
     return mission.is_mission_complete()
 
 
-history = simulate(aircraft, control_function, duration, dt, termination_condition)
+history = simulate(
+    aircraft, applied_control_function, duration, dt, termination_condition
+)
 
 # check metrics
 final_position = history[-1, :2]
