@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -8,6 +10,29 @@ from robust_flight.dynamics.aircraft import Aircraft
 from robust_flight.mission.mission import Mission
 from robust_flight.simulation.engine import simulate
 
+
+@dataclass
+class ExperimentResult:
+    simulation: object
+    history: np.ndarray
+    desired_speeds: np.ndarray
+    dt: float
+    speed_kp: float
+    final_position: np.ndarray
+    final_distance: float
+    final_speed: float
+    final_desired_speed: float
+    minimum_distance: float
+    speed_rmse: float
+    min_acceleration: float
+    max_acceleration: float
+    final_time: float
+    acceleration_saturation_rate: float
+    turn_rate_saturation_rate: float
+    max_acceleration_intervention: float
+    mean_acceleration_intervention: float
+    max_turn_rate_intervention: float
+    mean_turn_rate_intervention: float
 
 def run_experiment(speed_kp):
     # simulation parameters
@@ -227,18 +252,43 @@ def run_experiment(speed_kp):
         f"{mean_turn_rate_intervention:.3f} rad/s"
     )
 
-    return result, history, desired_speeds, dt
+    return ExperimentResult(
+        simulation=result,
+        history=history,
+        desired_speeds=desired_speeds,
+        dt=dt,
+        speed_kp=speed_kp,
+        final_position=final_position,
+        final_distance=final_distance,
+        final_speed=final_speed,
+        final_desired_speed=final_desired_speed,
+        minimum_distance=minimum_distance,
+        speed_rmse=speed_rmse,
+        min_acceleration=min_acceleration,
+        max_acceleration=max_acceleration,
+        final_time=final_time,
+        acceleration_saturation_rate=acceleration_saturation_rate,
+        turn_rate_saturation_rate=turn_rate_saturation_rate,
+        max_acceleration_intervention=max_acceleration_intervention,
+        mean_acceleration_intervention=mean_acceleration_intervention,
+        max_turn_rate_intervention=max_turn_rate_intervention,
+        mean_turn_rate_intervention=mean_turn_rate_intervention,
+    )
 
 
 if __name__ == "__main__":
     speed_kp = 2.0
 
-    result, history, desired_speeds, dt = run_experiment(speed_kp)
+    experiment = run_experiment(speed_kp)
 
-    x = history[:, 0]
-    y = history[:, 1]
-    v = history[:, 2]
-    time = np.arange(len(history)) * dt
+    history = experiment.history
+    desired_speeds = experiment.desired_speeds
+    dt = experiment.dt
+
+    x = experiment.history[:, 0]
+    y = experiment.history[:, 1]
+    v = experiment.history[:, 2]
+    time = np.arange(len(experiment.history)) * dt
 
     # plot desired vs actual speed
     plt.figure()
