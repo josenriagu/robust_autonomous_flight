@@ -31,12 +31,3 @@ class Actuator:
             self.max_turn_rate
         )
         return np.array([acceleration, turn_rate])
-
-actuator = Actuator(
-    min_acceleration=-2.0,
-    max_acceleration=3.0,
-    max_turn_rate=np.pi/3
-)
-
-actuator.apply(np.array([10.0, 2.0]))
-actuator.apply(np.array([-10.0, -2.0]))
