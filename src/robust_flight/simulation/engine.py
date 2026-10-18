@@ -17,8 +17,8 @@ def simulate(
         if actuator is not None:
             applied_control = actuator.apply(requested_control)
         else:
-            applied_control = control_function(aircraft.state)
-        
+            applied_control = requested_control
+
         requested_control_history.append(requested_control.copy())
         applied_control_history.append(applied_control.copy())
 
