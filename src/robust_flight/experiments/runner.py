@@ -28,9 +28,10 @@ class ExperimentConfig:
     initial_state: tuple = (0.0, 0.0, 10.0, 0.0)
     waypoints: tuple = ((50.0, 0.0), (50.0, 50.0), (0.0, 50.0), (0.0, 0.0))
 
-    # guidance parameters
+    # guidance parameters; braking is planned at 75% of the actuator's
+    # deceleration limit so the speed controller has margin to catch up
     max_speed: float = 20.0
-    max_deceleration: float = 2.0
+    max_deceleration: float = 1.5
 
     # controller gains
     heading_kp: float = 2.0
