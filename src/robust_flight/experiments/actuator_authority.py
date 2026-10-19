@@ -1,5 +1,6 @@
 from dataclasses import replace
 
+import matplotlib.pyplot as plt
 import numpy as np
 
 from robust_flight.experiments.runner import ExperimentConfig, run_experiment
@@ -35,6 +36,28 @@ def print_sweep(title, cases, authority_label):
             f"{result.acceleration_effort:>13.3f} "
             f"{result.turn_rate_effort:>12.3f}"
         )
+
+
+def plot_trajectories(title, cases, waypoints):
+    plt.figure()
+
+    for authority, result in cases:
+        plt.plot(
+            result.history[:, 0],
+            result.history[:, 1],
+            label=f"{authority} ({'done' if result.mission_complete else 'not done'})",
+        )
+
+    points = np.array(waypoints)
+    plt.plot(points[:, 0], points[:, 1], "kx", markersize=10, label="Waypoints")
+    plt.xlabel("x (m)")
+    plt.ylabel("y (m)")
+    plt.title(title)
+    plt.axis("equal")
+    plt.legend()
+    plt.grid()
+
+    plt.show()
 
 
 def main():
@@ -84,6 +107,12 @@ def main():
 
     print_sweep("Acceleration authority sweep", acceleration_cases, "Accel limits")
     print_sweep("Turn-rate authority sweep", turn_rate_cases, "Max turn rate")
+
+    plot_trajectories(
+        "Trajectories for Different Turn-Rate Limits",
+        turn_rate_cases,
+        baseline.waypoints,
+    )
 
 
 if __name__ == "__main__":
