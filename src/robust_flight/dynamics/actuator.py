@@ -8,12 +8,8 @@ class Actuator:
     and right. This can be generalized later if asymmetric actuator
     behavior needs to be modeled.
     """
-    def __init__(
-        self,
-        min_acceleration,
-        max_acceleration,
-        max_turn_rate
-    ):
+
+    def __init__(self, min_acceleration, max_acceleration, max_turn_rate):
         self.min_acceleration = min_acceleration
         self.max_acceleration = max_acceleration
         self.max_turn_rate = max_turn_rate
@@ -21,13 +17,7 @@ class Actuator:
     def apply(self, control):
         acceleration, turn_rate = control
         acceleration = np.clip(
-            acceleration,
-            self.min_acceleration,
-            self.max_acceleration
+            acceleration, self.min_acceleration, self.max_acceleration
         )
-        turn_rate = np.clip(
-            turn_rate,
-            -self.max_turn_rate,
-            self.max_turn_rate
-        )
+        turn_rate = np.clip(turn_rate, -self.max_turn_rate, self.max_turn_rate)
         return np.array([acceleration, turn_rate])

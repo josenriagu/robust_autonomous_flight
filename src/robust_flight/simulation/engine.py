@@ -29,8 +29,9 @@ def simulate(
     return SimulationResult(
         states=np.array(history),
         requested_controls=np.array(requested_control_history),
-        applied_controls=np.array(applied_control_history)
+        applied_controls=np.array(applied_control_history),
     )
+
 
 @dataclass
 class SimulationResult:
