@@ -20,6 +20,16 @@ class Waypoints:
         waypoint = np.array(waypoint)
         return np.linalg.norm(waypoint - position)
 
+    def cross_track_error(self, position, start, end):
+        # signed distance from the straight path between start and end;
+        # positive when the position is to the left of the path
+        position = np.array(position)
+        start = np.array(start)
+        end = np.array(end)
+        path = end - start
+        offset = position - start
+        return (path[0] * offset[1] - path[1] * offset[0]) / np.linalg.norm(path)
+
     def desired_speed(self, position, waypoint, max_speed, max_deceleration):
         distance = self.distance_to_waypoint(position, waypoint)
         braking_speed = np.sqrt(2 * max_deceleration * distance)
