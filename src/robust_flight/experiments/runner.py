@@ -20,12 +20,13 @@ class ExperimentConfig:
     """
 
     # simulation parameters
-    duration: float = 10.0
+    duration: float = 60.0
     dt: float = 0.01
 
-    # initial state [px, py, v, psi] and mission waypoints
+    # initial state [px, py, v, psi] and a 50 m square mission with
+    # 90 degree turns that returns to the start
     initial_state: tuple = (0.0, 0.0, 10.0, 0.0)
-    waypoints: tuple = ((50.0, 30.0),)
+    waypoints: tuple = ((50.0, 0.0), (50.0, 50.0), (0.0, 50.0), (0.0, 0.0))
 
     # guidance parameters
     max_speed: float = 20.0
