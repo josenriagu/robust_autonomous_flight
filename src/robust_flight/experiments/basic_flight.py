@@ -12,6 +12,9 @@ def print_result(result):
     print(f"Final speed: {result.final_speed:.3f} m/s")
     print(f"Final distance: {result.final_distance:.3f} m")
     print(f"Minimum distance: {result.minimum_distance:.3f} m")
+    print(f"Cross-track RMSE: {result.cross_track_rmse:.3f} m")
+    print(f"Maximum cross-track error: {result.max_cross_track_error:.3f} m")
+    print(f"Mission complete: {'yes' if result.mission_complete else 'no'}")
     print(f"Final desired speed: {result.final_desired_speed:.3f} m/s")
     print(f"Speed RMSE: {result.speed_rmse:.3f} m/s")
     print(f"Minimum acceleration: {result.min_observed_acceleration:.3f} m/s²")
@@ -49,26 +52,28 @@ def main():
         experiments.append(experiment)
 
     print("\nGain comparison")
-    print("-" * 80)
+    print("-" * 84)
 
     print(
         f"{'Kp':>6} "
         f"{'RMSE':>10} "
         f"{'Max Err.':>10} "
-        f"{'Final Dist.':>12} "
+        f"{'XTE RMSE':>10} "
+        f"{'Done':>6} "
         f"{'Accel Sat.':>12} "
         f"{'Mean Int.':>12} "
         f"{'Time':>10}"
     )
 
-    print("-" * 80)
+    print("-" * 84)
 
     for experiment in experiments:
         print(
             f"{experiment.config.speed_kp:>6.2f} "
             f"{experiment.speed_rmse:>10.3f} "
             f"{experiment.max_speed_error:>10.3f} "
-            f"{experiment.final_distance:>12.3f} "
+            f"{experiment.cross_track_rmse:>10.3f} "
+            f"{'yes' if experiment.mission_complete else 'no':>6} "
             f"{experiment.acceleration_saturation_rate * 100:>11.1f}% "
             f"{experiment.mean_acceleration_intervention:>12.3f} "
             f"{experiment.final_time:>10.3f}"

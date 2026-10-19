@@ -9,8 +9,8 @@ def print_sweep(title, cases, authority_label):
     print(f"\n{title}")
     print(
         f"{authority_label:>18} {'Speed RMSE':>11} {'Max speed err.':>15} "
-        f"{'Final dist.':>12} {'Min dist.':>11} {'Final speed':>12} "
-        f"{'Time':>8} {'Accel sat.':>11} {'Turn sat.':>10} "
+        f"{'XTE RMSE':>9} {'Max XTE':>8} {'Final speed':>12} "
+        f"{'Done':>5} {'Time':>8} {'Accel sat.':>11} {'Turn sat.':>10} "
         f"{'Mean accel int.':>16} {'Max accel int.':>15} "
         f"{'Mean turn int.':>15} {'Max turn int.':>14} "
         f"{'Accel effort':>13} {'Turn effort':>12}"
@@ -21,9 +21,10 @@ def print_sweep(title, cases, authority_label):
             f"{authority:>18} "
             f"{result.speed_rmse:>11.3f} "
             f"{result.max_speed_error:>15.3f} "
-            f"{result.final_distance:>12.3f} "
-            f"{result.minimum_distance:>11.3f} "
+            f"{result.cross_track_rmse:>9.3f} "
+            f"{result.max_cross_track_error:>8.3f} "
             f"{result.final_speed:>12.3f} "
+            f"{'yes' if result.mission_complete else 'no':>5} "
             f"{result.final_time:>8.2f} "
             f"{result.acceleration_saturation_rate * 100:>10.1f}% "
             f"{result.turn_rate_saturation_rate * 100:>9.1f}% "
