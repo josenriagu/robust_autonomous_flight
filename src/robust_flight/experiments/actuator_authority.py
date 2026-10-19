@@ -8,7 +8,7 @@ from robust_flight.experiments.runner import ExperimentConfig, run_experiment
 def print_sweep(title, cases, authority_label):
     print(f"\n{title}")
     print(
-        f"{authority_label:>18} {'Speed RMSE':>11} {'Max speed err.':>15} "
+        f"{authority_label:>18} {'Speed RMSE':>11} {'Max overspeed':>14} "
         f"{'XTE RMSE':>9} {'Max XTE':>8} {'Final speed':>12} "
         f"{'Done':>5} {'Time':>8} {'Accel sat.':>11} {'Turn sat.':>10} "
         f"{'Mean accel int.':>16} {'Max accel int.':>15} "
@@ -20,7 +20,7 @@ def print_sweep(title, cases, authority_label):
         print(
             f"{authority:>18} "
             f"{result.speed_rmse:>11.3f} "
-            f"{result.max_speed_error:>15.3f} "
+            f"{result.max_overspeed:>14.3f} "
             f"{result.cross_track_rmse:>9.3f} "
             f"{result.max_cross_track_error:>8.3f} "
             f"{result.final_speed:>12.3f} "

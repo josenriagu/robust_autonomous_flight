@@ -20,6 +20,7 @@ def print_result(result):
     print(f"Minimum acceleration: {result.min_observed_acceleration:.3f} m/s²")
     print(f"Maximum acceleration: {result.max_observed_acceleration:.3f} m/s²")
     print(f"Maximum speed error: {result.max_speed_error:.3f} m/s")
+    print(f"Maximum overspeed: {result.max_overspeed:.3f} m/s")
     print(f"Final time: {result.final_time:.3f} s")
     print(
         f"Acceleration saturation rate: "
@@ -57,7 +58,7 @@ def main():
     print(
         f"{'Kp':>6} "
         f"{'RMSE':>10} "
-        f"{'Max Err.':>10} "
+        f"{'Overspeed':>10} "
         f"{'XTE RMSE':>10} "
         f"{'Done':>6} "
         f"{'Accel Sat.':>12} "
@@ -71,7 +72,7 @@ def main():
         print(
             f"{experiment.config.speed_kp:>6.2f} "
             f"{experiment.speed_rmse:>10.3f} "
-            f"{experiment.max_speed_error:>10.3f} "
+            f"{experiment.max_overspeed:>10.3f} "
             f"{experiment.cross_track_rmse:>10.3f} "
             f"{'yes' if experiment.mission_complete else 'no':>6} "
             f"{experiment.acceleration_saturation_rate * 100:>11.1f}% "

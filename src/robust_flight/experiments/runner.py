@@ -58,6 +58,7 @@ class ExperimentResult:
     max_cross_track_error: float
     speed_rmse: float
     max_speed_error: float
+    max_overspeed: float
     min_observed_acceleration: float
     max_observed_acceleration: float
     final_time: float
@@ -134,6 +135,10 @@ def run_experiment(config):
         ]
     )
     speed_errors = desired_speeds - history[:, 2]
+
+    # overspeed is flying faster than the desired speed; the largest
+    # under-speed is set by the initial state rather than the controller
+    max_overspeed = max(0.0, -np.min(speed_errors))
     observed_accelerations = np.diff(history[:, 2]) / dt
 
     # calculate distance to waypoint
@@ -172,6 +177,7 @@ def run_experiment(config):
         max_cross_track_error=float(np.max(np.abs(cross_track_errors))),
         speed_rmse=float(np.sqrt(np.mean(speed_errors**2))),
         max_speed_error=float(np.max(np.abs(speed_errors))),
+        max_overspeed=float(max_overspeed),
         min_observed_acceleration=float(np.min(observed_accelerations)),
         max_observed_acceleration=float(np.max(observed_accelerations)),
         final_time=float((len(history) - 1) * dt),
