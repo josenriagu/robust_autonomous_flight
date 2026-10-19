@@ -4,7 +4,13 @@ import numpy as np
 
 
 def simulate(
-    aircraft, control_function, duration, dt, termination_condition=None, actuator=None
+    aircraft,
+    control_function,
+    duration,
+    dt,
+    termination_condition=None,
+    actuator=None,
+    step_callback=None,
 ):
     num_steps = int(duration / dt)
     history = [aircraft.state.copy()]
@@ -24,6 +30,12 @@ def simulate(
 
         aircraft.step(applied_control, dt)
         history.append(aircraft.state.copy())
+
+        # lets observers such as sensors see each step without the engine
+        # knowing what they are
+        if step_callback is not None:
+            step_callback(aircraft.time, aircraft.state.copy(), applied_control.copy())
+
         if termination_condition is not None and termination_condition(aircraft.state):
             break
     return SimulationResult(
