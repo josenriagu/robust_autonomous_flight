@@ -101,7 +101,7 @@ def main():
 
     plt.xlabel("Time (s)")
     plt.ylabel("Speed (m/s)")
-    plt.title("Speed Tracking for ifferent Controller Gains")
+    plt.title("Speed Tracking for different Controller Gains")
     plt.legend()
     plt.grid()
 
