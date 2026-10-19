@@ -84,7 +84,11 @@ def run_experiment(config):
         max_turn_rate=config.max_turn_rate,
     )
 
+    # index of the waypoint the controller steered towards at each step
+    active_waypoint_indices = []
+
     def control_function(state):
+        active_waypoint_indices.append(mission.current_waypoint_index)
         waypoint = mission.current_waypoint()
 
         if waypoint is None:
@@ -118,20 +122,25 @@ def run_experiment(config):
     history = simulation.states
     dt = config.dt
 
-    # metrics are measured against the final waypoint, which is only
-    # exact for single-waypoint missions
-    waypoint = mission.waypoints.points[-1]
+    # each leg runs from the previous waypoint, or the initial position,
+    # to the active waypoint; the final state stays on the last leg
+    points = mission.waypoints.points
+    leg_starts = np.vstack([config.initial_state[:2], points[:-1]])
+    leg_indices = active_waypoint_indices + active_waypoint_indices[-1:]
+    leg_start_points = leg_starts[leg_indices]
+    leg_end_points = points[leg_indices]
+    waypoint = points[-1]
 
     # calculate speed tracking
     desired_speeds = np.array(
         [
             mission.waypoints.desired_speed(
                 position,
-                waypoint,
+                leg_end,
                 config.max_speed,
                 config.max_deceleration,
             )
-            for position in history[:, :2]
+            for position, leg_end in zip(history[:, :2], leg_end_points)
         ]
     )
     speed_errors = desired_speeds - history[:, 2]
@@ -146,12 +155,13 @@ def run_experiment(config):
     final_distance = mission.waypoints.distance_to_waypoint(final_position, waypoint)
     distances = np.linalg.norm(history[:, :2] - waypoint, axis=1)
 
-    # calculate deviation from the straight path to the waypoint
-    path_start = np.array(config.initial_state[:2])
+    # calculate deviation from the straight path of the active leg
     cross_track_errors = np.array(
         [
-            mission.waypoints.cross_track_error(position, path_start, waypoint)
-            for position in history[:, :2]
+            mission.waypoints.cross_track_error(position, leg_start, leg_end)
+            for position, leg_start, leg_end in zip(
+                history[:, :2], leg_start_points, leg_end_points
+            )
         ]
     )
 
