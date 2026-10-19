@@ -21,7 +21,7 @@ class ExperimentConfig:
 
     # simulation parameters
     duration: float = 10.0
-    dt: float = 0.1
+    dt: float = 0.01
 
     # initial state [px, py, v, psi] and mission waypoints
     initial_state: tuple = (0.0, 0.0, 10.0, 0.0)
