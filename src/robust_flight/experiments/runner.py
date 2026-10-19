@@ -53,11 +53,15 @@ class ExperimentResult:
     final_speed: float
     final_desired_speed: float
     minimum_distance: float
+    cross_track_errors: np.ndarray
+    cross_track_rmse: float
+    max_cross_track_error: float
     speed_rmse: float
     max_speed_error: float
     min_observed_acceleration: float
     max_observed_acceleration: float
     final_time: float
+    mission_complete: bool
     acceleration_saturation_rate: float
     turn_rate_saturation_rate: float
     max_acceleration_intervention: float
@@ -137,6 +141,15 @@ def run_experiment(config):
     final_distance = mission.waypoints.distance_to_waypoint(final_position, waypoint)
     distances = np.linalg.norm(history[:, :2] - waypoint, axis=1)
 
+    # calculate deviation from the straight path to the waypoint
+    path_start = np.array(config.initial_state[:2])
+    cross_track_errors = np.array(
+        [
+            mission.waypoints.cross_track_error(position, path_start, waypoint)
+            for position in history[:, :2]
+        ]
+    )
+
     # calculate actuator intervention and control effort
     applied_controls = simulation.applied_controls
     control_difference = simulation.requested_controls - applied_controls
@@ -154,11 +167,15 @@ def run_experiment(config):
         final_speed=float(history[-1, 2]),
         final_desired_speed=float(desired_speeds[-1]),
         minimum_distance=float(np.min(distances)),
+        cross_track_errors=cross_track_errors,
+        cross_track_rmse=float(np.sqrt(np.mean(cross_track_errors**2))),
+        max_cross_track_error=float(np.max(np.abs(cross_track_errors))),
         speed_rmse=float(np.sqrt(np.mean(speed_errors**2))),
         max_speed_error=float(np.max(np.abs(speed_errors))),
         min_observed_acceleration=float(np.min(observed_accelerations)),
         max_observed_acceleration=float(np.max(observed_accelerations)),
         final_time=float((len(history) - 1) * dt),
+        mission_complete=mission.is_mission_complete(),
         acceleration_saturation_rate=float(np.mean(control_difference[:, 0] != 0.0)),
         turn_rate_saturation_rate=float(np.mean(control_difference[:, 1] != 0.0)),
         max_acceleration_intervention=float(np.max(acceleration_intervention)),
