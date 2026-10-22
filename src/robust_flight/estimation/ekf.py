@@ -1,5 +1,9 @@
 import numpy as np
 
+# a filter told a sensor is perfect divides by zero, so every assumed noise
+# level is at least this small value
+MIN_NOISE = 1e-6
+
 
 class EKF:
     """Estimate the aircraft state [px, py, v, psi] from IMU and GPS.
@@ -21,6 +25,16 @@ class EKF:
     ):
         self.state = np.array(initial_state, dtype=float)
         self.covariance = np.array(initial_covariance, dtype=float)
+
+        acceleration_noise, yaw_rate_noise, position_noise, velocity_noise = (
+            max(noise, MIN_NOISE)
+            for noise in (
+                acceleration_noise,
+                yaw_rate_noise,
+                position_noise,
+                velocity_noise,
+            )
+        )
         self.imu_covariance = np.diag([acceleration_noise**2, yaw_rate_noise**2])
         self.gps_covariance = np.diag(
             [position_noise**2, position_noise**2, velocity_noise**2, velocity_noise**2]

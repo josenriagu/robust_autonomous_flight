@@ -6,6 +6,7 @@ from robust_flight.control.heading import HeadingController
 from robust_flight.control.speed import SpeedController
 from robust_flight.dynamics.actuator import Actuator
 from robust_flight.dynamics.aircraft import Aircraft
+from robust_flight.estimation.ekf import EKF
 from robust_flight.mission.mission import Mission
 from robust_flight.sensors.gps import GPS
 from robust_flight.sensors.imu import IMU
@@ -63,8 +64,15 @@ class ExperimentConfig:
     imu_acceleration_bias: float = 0.0
     imu_yaw_rate_bias: float = 0.0
 
+    # EKF starting uncertainty, in m, m/s and rad; its starting estimate is
+    # the initial state, and it assumes the sensor noise levels above
+    ekf_initial_position_std: float = 1.0
+    ekf_initial_speed_std: float = 0.5
+    ekf_initial_heading_std: float = np.radians(5.0)
+
     # the state the controller and the mission act on: "true" for the true
-    # state, or "gps" for the latest GPS sample, held until the next one
+    # state, "gps" for the latest GPS sample, held until the next one, or
+    # "ekf" for the EKF estimate
     feedback: str = "true"
 
 
@@ -107,10 +115,16 @@ class ExperimentResult:
     feedback_position_rmse: float
     feedback_speed_rmse: float
     feedback_heading_rmse: float
+    ekf_states: np.ndarray
+    ekf_covariances: np.ndarray
+    ekf_position_rmse: float
+    ekf_speed_rmse: float
+    ekf_heading_rmse: float
+    ekf_nees: float
 
 
 def run_experiment(config):
-    if config.feedback not in ("true", "gps"):
+    if config.feedback not in ("true", "gps", "ekf"):
         raise ValueError(f"unknown feedback {config.feedback!r}")
 
     aircraft = Aircraft(np.array(config.initial_state))
@@ -152,19 +166,48 @@ def run_experiment(config):
     # aircraft knows only its initial state
     gps_state = np.array(config.initial_state, dtype=float)
 
+    # the EKF runs in every mode, so its accuracy can be compared with the
+    # other feedback options on the same flight
+    ekf = EKF(
+        config.initial_state,
+        np.diag(
+            [
+                config.ekf_initial_position_std**2,
+                config.ekf_initial_position_std**2,
+                config.ekf_initial_speed_std**2,
+                config.ekf_initial_heading_std**2,
+            ]
+        ),
+        acceleration_noise=config.imu_acceleration_noise,
+        yaw_rate_noise=config.imu_yaw_rate_noise,
+        position_noise=config.gps_position_noise,
+        velocity_noise=config.gps_velocity_noise,
+    )
+    ekf_states = [ekf.state.copy()]
+    ekf_covariances = [ekf.covariance.copy()]
+
     def record_measurements(time, state, applied_control):
         nonlocal gps_state
-        imu_measurements.append(imu.measure(applied_control))
+        imu_measurement = imu.measure(applied_control)
+        imu_measurements.append(imu_measurement)
+        ekf.predict(imu_measurement, config.dt)
+
         gps_measurement = gps.measure(time, state)
         if gps_measurement is not None:
             gps_steps.append(len(imu_measurements))
             gps_times.append(time)
             gps_measurements.append(gps_measurement)
             gps_state = state_from_gps(gps_measurement)
+            ekf.update(gps_measurement)
+
+        ekf_states.append(ekf.state.copy())
+        ekf_covariances.append(ekf.covariance.copy())
 
     def believed_state(true_state):
         if config.feedback == "gps":
             return gps_state
+        if config.feedback == "ekf":
+            return ekf.state.copy()
         return true_state
 
     # index of the waypoint the controller steered towards at each step, and
@@ -279,6 +322,15 @@ def run_experiment(config):
     feedback_errors = feedback_states - history[:-1]
     heading_errors = (feedback_errors[:, 3] + np.pi) % (2 * np.pi) - np.pi
 
+    # calculate EKF error against the true state at every recorded index, and
+    # its NEES, which averages 4 when the reported uncertainty is honest
+    ekf_states = np.array(ekf_states)
+    ekf_covariances = np.array(ekf_covariances)
+    ekf_errors = ekf_states - history
+    ekf_errors[:, 3] = (ekf_errors[:, 3] + np.pi) % (2 * np.pi) - np.pi
+    weighted_errors = np.linalg.solve(ekf_covariances, ekf_errors[:, :, None])
+    ekf_nees = np.einsum("ki,ki->k", ekf_errors, weighted_errors[:, :, 0])
+
     return ExperimentResult(
         config=config,
         simulation=simulation,
@@ -317,6 +369,12 @@ def run_experiment(config):
         feedback_position_rmse=rms_norm(feedback_errors[:, :2]),
         feedback_speed_rmse=float(np.sqrt(np.mean(feedback_errors[:, 2] ** 2))),
         feedback_heading_rmse=float(np.sqrt(np.mean(heading_errors**2))),
+        ekf_states=ekf_states,
+        ekf_covariances=ekf_covariances,
+        ekf_position_rmse=rms_norm(ekf_errors[:, :2]),
+        ekf_speed_rmse=float(np.sqrt(np.mean(ekf_errors[:, 2] ** 2))),
+        ekf_heading_rmse=float(np.sqrt(np.mean(ekf_errors[:, 3] ** 2))),
+        ekf_nees=float(np.mean(ekf_nees[1:])),
     )
 
 
