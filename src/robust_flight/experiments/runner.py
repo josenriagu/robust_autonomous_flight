@@ -30,6 +30,9 @@ class ExperimentConfig:
     initial_state: tuple = (0.0, 0.0, 10.0, 0.0)
     waypoints: tuple = ((50.0, 0.0), (50.0, 50.0), (0.0, 50.0), (0.0, 0.0))
 
+    # a waypoint counts as reached within this distance, in m
+    arrival_radius: float = 1.0
+
     # guidance parameters; braking is planned at 75% of the actuator's
     # deceleration limit so the speed controller has margin to catch up
     max_speed: float = 20.0
@@ -111,7 +114,7 @@ def run_experiment(config):
         raise ValueError(f"unknown feedback {config.feedback!r}")
 
     aircraft = Aircraft(np.array(config.initial_state))
-    mission = Mission(config.waypoints)
+    mission = Mission(config.waypoints, arrival_radius=config.arrival_radius)
     heading_controller = HeadingController(kp=config.heading_kp)
     speed_controller = SpeedController(kp=config.speed_kp)
     actuator = Actuator(
