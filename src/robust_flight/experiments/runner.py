@@ -7,6 +7,8 @@ from robust_flight.control.speed import SpeedController
 from robust_flight.dynamics.actuator import Actuator
 from robust_flight.dynamics.aircraft import Aircraft
 from robust_flight.mission.mission import Mission
+from robust_flight.sensors.gps import GPS
+from robust_flight.sensors.imu import IMU
 from robust_flight.simulation.engine import SimulationResult, simulate
 
 
@@ -42,6 +44,22 @@ class ExperimentConfig:
     max_acceleration: float = 3.0
     max_turn_rate: float = np.pi / 3
 
+    # random seed; each sensor draws from its own stream split from it
+    seed: int = 0
+
+    # GPS: position and velocity at a fixed rate, in m and m/s
+    gps_rate: float = 5.0
+    gps_position_noise: float = 1.0
+    gps_velocity_noise: float = 0.1
+    gps_position_bias: tuple = (0.0, 0.0)
+    gps_dropout_probability: float = 0.0
+
+    # IMU: acceleration and yaw rate every step, in m/s² and rad/s
+    imu_acceleration_noise: float = 0.05
+    imu_yaw_rate_noise: float = 0.01
+    imu_acceleration_bias: float = 0.0
+    imu_yaw_rate_bias: float = 0.0
+
 
 @dataclass
 class ExperimentResult:
@@ -73,6 +91,11 @@ class ExperimentResult:
     mean_turn_rate_intervention: float
     acceleration_effort: float
     turn_rate_effort: float
+    gps_times: np.ndarray
+    gps_measurements: np.ndarray
+    imu_measurements: np.ndarray
+    gps_position_rmse: float
+    gps_velocity_rmse: float
 
 
 def run_experiment(config):
@@ -85,6 +108,41 @@ def run_experiment(config):
         max_acceleration=config.max_acceleration,
         max_turn_rate=config.max_turn_rate,
     )
+
+    gps_rng, imu_rng = (
+        np.random.default_rng(seed)
+        for seed in np.random.SeedSequence(config.seed).spawn(2)
+    )
+    gps = GPS(
+        gps_rng,
+        rate=config.gps_rate,
+        position_noise=config.gps_position_noise,
+        velocity_noise=config.gps_velocity_noise,
+        position_bias=config.gps_position_bias,
+        dropout_probability=config.gps_dropout_probability,
+    )
+    imu = IMU(
+        imu_rng,
+        acceleration_noise=config.imu_acceleration_noise,
+        yaw_rate_noise=config.imu_yaw_rate_noise,
+        acceleration_bias=config.imu_acceleration_bias,
+        yaw_rate_bias=config.imu_yaw_rate_bias,
+    )
+
+    # measurements are recorded alongside the flight; the controller still
+    # steers on the true state
+    gps_steps = []
+    gps_times = []
+    gps_measurements = []
+    imu_measurements = []
+
+    def record_measurements(time, state, applied_control):
+        imu_measurements.append(imu.measure(applied_control))
+        gps_measurement = gps.measure(time, state)
+        if gps_measurement is not None:
+            gps_steps.append(len(imu_measurements))
+            gps_times.append(time)
+            gps_measurements.append(gps_measurement)
 
     # index of the waypoint the controller steered towards at each step
     active_waypoint_indices = []
@@ -120,6 +178,7 @@ def run_experiment(config):
         config.dt,
         termination_condition,
         actuator=actuator,
+        step_callback=record_measurements,
     )
     history = simulation.states
     dt = config.dt
@@ -173,6 +232,19 @@ def run_experiment(config):
     acceleration_intervention = np.abs(control_difference[:, 0])
     turn_rate_intervention = np.abs(control_difference[:, 1])
 
+    # calculate GPS error against the true state at each sample; a step's
+    # callback sees the state recorded at the same index in the history
+    gps_measurements = np.array(gps_measurements).reshape(-1, 4)
+    true_states = history[gps_steps]
+    true_velocities = np.column_stack(
+        [
+            true_states[:, 2] * np.cos(true_states[:, 3]),
+            true_states[:, 2] * np.sin(true_states[:, 3]),
+        ]
+    )
+    gps_position_errors = gps_measurements[:, :2] - true_states[:, :2]
+    gps_velocity_errors = gps_measurements[:, 2:] - true_velocities
+
     return ExperimentResult(
         config=config,
         simulation=simulation,
@@ -202,4 +274,16 @@ def run_experiment(config):
         mean_turn_rate_intervention=float(np.mean(turn_rate_intervention)),
         acceleration_effort=float(np.sum(applied_controls[:, 0] ** 2) * dt),
         turn_rate_effort=float(np.sum(applied_controls[:, 1] ** 2) * dt),
+        gps_times=np.array(gps_times),
+        gps_measurements=gps_measurements,
+        imu_measurements=np.array(imu_measurements),
+        gps_position_rmse=rms_norm(gps_position_errors),
+        gps_velocity_rmse=rms_norm(gps_velocity_errors),
     )
+
+
+def rms_norm(errors):
+    # root mean square of the error vector's length; nan when there are none
+    if len(errors) == 0:
+        return float("nan")
+    return float(np.sqrt(np.mean(np.sum(errors**2, axis=1))))
