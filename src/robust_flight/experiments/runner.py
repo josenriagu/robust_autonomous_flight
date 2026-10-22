@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from robust_flight.communication.link import CommunicationLink
 from robust_flight.control.heading import HeadingController
 from robust_flight.control.speed import SpeedController
 from robust_flight.dynamics.actuator import Actuator
@@ -64,6 +65,13 @@ class ExperimentConfig:
     imu_acceleration_bias: float = 0.0
     imu_yaw_rate_bias: float = 0.0
 
+    # datalink carrying GPS fixes to the flight computer; delay and jitter in
+    # s, outages as (start, end) windows in s. The IMU is onboard.
+    link_delay: float = 0.0
+    link_jitter: float = 0.0
+    link_loss_probability: float = 0.0
+    link_outages: tuple = ()
+
     # EKF starting uncertainty, in m, m/s and rad; its starting estimate is
     # the initial state, and it assumes the sensor noise levels above
     ekf_initial_position_std: float = 1.0
@@ -111,6 +119,11 @@ class ExperimentResult:
     imu_measurements: np.ndarray
     gps_position_rmse: float
     gps_velocity_rmse: float
+    gps_sent_count: int
+    gps_lost_count: int
+    gps_delivered_count: int
+    gps_discarded_count: int
+    gps_mean_age: float
     feedback_states: np.ndarray
     feedback_position_rmse: float
     feedback_speed_rmse: float
@@ -137,9 +150,10 @@ def run_experiment(config):
         max_turn_rate=config.max_turn_rate,
     )
 
-    gps_rng, imu_rng = (
+    # spawning a third stream leaves the first two unchanged
+    gps_rng, imu_rng, link_rng = (
         np.random.default_rng(seed)
-        for seed in np.random.SeedSequence(config.seed).spawn(2)
+        for seed in np.random.SeedSequence(config.seed).spawn(3)
     )
     gps = GPS(
         gps_rng,
@@ -157,10 +171,24 @@ def run_experiment(config):
         yaw_rate_bias=config.imu_yaw_rate_bias,
     )
 
+    link = CommunicationLink(
+        link_rng,
+        delay=config.link_delay,
+        jitter=config.link_jitter,
+        loss_probability=config.link_loss_probability,
+        outages=config.link_outages,
+    )
+
     gps_steps = []
     gps_times = []
     gps_measurements = []
     imu_measurements = []
+
+    # GPS packets that reached the flight computer: age on arrival, and how
+    # many were older than a fix already applied and so were discarded
+    gps_ages = []
+    gps_discarded_count = 0
+    newest_applied_time = -np.inf
 
     # the latest GPS sample as a state; before the first sample arrives the
     # aircraft knows only its initial state
@@ -187,7 +215,7 @@ def run_experiment(config):
     ekf_covariances = [ekf.covariance.copy()]
 
     def record_measurements(time, state, applied_control):
-        nonlocal gps_state
+        nonlocal gps_state, gps_discarded_count, newest_applied_time
         imu_measurement = imu.measure(applied_control)
         imu_measurements.append(imu_measurement)
         ekf.predict(imu_measurement, config.dt)
@@ -197,8 +225,16 @@ def run_experiment(config):
             gps_steps.append(len(imu_measurements))
             gps_times.append(time)
             gps_measurements.append(gps_measurement)
-            gps_state = state_from_gps(gps_measurement)
-            ekf.update(gps_measurement)
+            link.send(time, (time, gps_measurement))
+
+        for measured_time, measurement in link.receive(time):
+            if measured_time <= newest_applied_time:
+                gps_discarded_count += 1
+                continue
+            newest_applied_time = measured_time
+            gps_ages.append(time - measured_time)
+            gps_state = state_from_gps(measurement)
+            ekf.update(measurement)
 
         ekf_states.append(ekf.state.copy())
         ekf_covariances.append(ekf.covariance.copy())
@@ -365,6 +401,11 @@ def run_experiment(config):
         imu_measurements=np.array(imu_measurements),
         gps_position_rmse=rms_norm(gps_position_errors),
         gps_velocity_rmse=rms_norm(gps_velocity_errors),
+        gps_sent_count=link.sent_count,
+        gps_lost_count=link.lost_count,
+        gps_delivered_count=len(gps_ages) + gps_discarded_count,
+        gps_discarded_count=gps_discarded_count,
+        gps_mean_age=float(np.mean(gps_ages)) if gps_ages else float("nan"),
         feedback_states=feedback_states,
         feedback_position_rmse=rms_norm(feedback_errors[:, :2]),
         feedback_speed_rmse=float(np.sqrt(np.mean(feedback_errors[:, 2] ** 2))),
