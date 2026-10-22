@@ -60,6 +60,10 @@ class ExperimentConfig:
     imu_acceleration_bias: float = 0.0
     imu_yaw_rate_bias: float = 0.0
 
+    # the state the controller and the mission act on: "true" for the true
+    # state, or "gps" for the latest GPS sample, held until the next one
+    feedback: str = "true"
+
 
 @dataclass
 class ExperimentResult:
@@ -96,9 +100,16 @@ class ExperimentResult:
     imu_measurements: np.ndarray
     gps_position_rmse: float
     gps_velocity_rmse: float
+    feedback_states: np.ndarray
+    feedback_position_rmse: float
+    feedback_speed_rmse: float
+    feedback_heading_rmse: float
 
 
 def run_experiment(config):
+    if config.feedback not in ("true", "gps"):
+        raise ValueError(f"unknown feedback {config.feedback!r}")
+
     aircraft = Aircraft(np.array(config.initial_state))
     mission = Mission(config.waypoints)
     heading_controller = HeadingController(kp=config.heading_kp)
@@ -129,25 +140,38 @@ def run_experiment(config):
         yaw_rate_bias=config.imu_yaw_rate_bias,
     )
 
-    # measurements are recorded alongside the flight; the controller still
-    # steers on the true state
     gps_steps = []
     gps_times = []
     gps_measurements = []
     imu_measurements = []
 
+    # the latest GPS sample as a state; before the first sample arrives the
+    # aircraft knows only its initial state
+    gps_state = np.array(config.initial_state, dtype=float)
+
     def record_measurements(time, state, applied_control):
+        nonlocal gps_state
         imu_measurements.append(imu.measure(applied_control))
         gps_measurement = gps.measure(time, state)
         if gps_measurement is not None:
             gps_steps.append(len(imu_measurements))
             gps_times.append(time)
             gps_measurements.append(gps_measurement)
+            gps_state = state_from_gps(gps_measurement)
 
-    # index of the waypoint the controller steered towards at each step
+    def believed_state(true_state):
+        if config.feedback == "gps":
+            return gps_state
+        return true_state
+
+    # index of the waypoint the controller steered towards at each step, and
+    # the state it steered on
     active_waypoint_indices = []
+    feedback_states = []
 
-    def control_function(state):
+    def control_function(true_state):
+        state = believed_state(true_state)
+        feedback_states.append(state.copy())
         active_waypoint_indices.append(mission.current_waypoint_index)
         waypoint = mission.current_waypoint()
 
@@ -167,8 +191,9 @@ def run_experiment(config):
         turn_rate = heading_controller.control(heading_error)
         return np.array([acceleration, turn_rate])
 
-    def termination_condition(state):
-        mission.update(state[:2])
+    # waypoints are reached by the position the aircraft believes it is at
+    def termination_condition(true_state):
+        mission.update(believed_state(true_state)[:2])
         return mission.is_mission_complete()
 
     simulation = simulate(
@@ -245,6 +270,12 @@ def run_experiment(config):
     gps_position_errors = gps_measurements[:, :2] - true_states[:, :2]
     gps_velocity_errors = gps_measurements[:, 2:] - true_velocities
 
+    # calculate the error in the state the controller steered on; step k
+    # steered on its belief about the state recorded at index k
+    feedback_states = np.array(feedback_states)
+    feedback_errors = feedback_states - history[:-1]
+    heading_errors = (feedback_errors[:, 3] + np.pi) % (2 * np.pi) - np.pi
+
     return ExperimentResult(
         config=config,
         simulation=simulation,
@@ -279,7 +310,17 @@ def run_experiment(config):
         imu_measurements=np.array(imu_measurements),
         gps_position_rmse=rms_norm(gps_position_errors),
         gps_velocity_rmse=rms_norm(gps_velocity_errors),
+        feedback_states=feedback_states,
+        feedback_position_rmse=rms_norm(feedback_errors[:, :2]),
+        feedback_speed_rmse=float(np.sqrt(np.mean(feedback_errors[:, 2] ** 2))),
+        feedback_heading_rmse=float(np.sqrt(np.mean(heading_errors**2))),
     )
+
+
+def state_from_gps(measurement):
+    # speed and heading follow from the measured velocity vector
+    px, py, vx, vy = measurement
+    return np.array([px, py, np.hypot(vx, vy), np.arctan2(vy, vx)])
 
 
 def rms_norm(errors):
