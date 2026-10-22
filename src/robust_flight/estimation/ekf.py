@@ -1,0 +1,78 @@
+import numpy as np
+
+
+class EKF:
+    """Estimate the aircraft state [px, py, v, psi] from IMU and GPS.
+
+    Every step predicts the state with the same planar model the aircraft
+    follows, driven by the measured acceleration and yaw rate. Each GPS
+    sample of position and velocity then corrects the prediction. The
+    filter assumes the noise levels it is given are the sensors' true ones.
+    """
+
+    def __init__(
+        self,
+        initial_state,
+        initial_covariance,
+        acceleration_noise,
+        yaw_rate_noise,
+        position_noise,
+        velocity_noise,
+    ):
+        self.state = np.array(initial_state, dtype=float)
+        self.covariance = np.array(initial_covariance, dtype=float)
+        self.imu_covariance = np.diag([acceleration_noise**2, yaw_rate_noise**2])
+        self.gps_covariance = np.diag(
+            [position_noise**2, position_noise**2, velocity_noise**2, velocity_noise**2]
+        )
+
+    def predict(self, imu_measurement, dt):
+        px, py, v, psi = self.state
+        acceleration, yaw_rate = imu_measurement
+        cos_psi, sin_psi = np.cos(psi), np.sin(psi)
+
+        self.state = self.state + dt * np.array(
+            [v * cos_psi, v * sin_psi, acceleration, yaw_rate]
+        )
+
+        # Jacobian of one step of the model with respect to the state
+        F = np.eye(4)
+        F[0, 2] = dt * cos_psi
+        F[0, 3] = -dt * v * sin_psi
+        F[1, 2] = dt * sin_psi
+        F[1, 3] = dt * v * cos_psi
+
+        # IMU noise enters speed and heading through one time step
+        G = np.zeros((4, 2))
+        G[2, 0] = dt
+        G[3, 1] = dt
+
+        self.covariance = F @ self.covariance @ F.T + G @ self.imu_covariance @ G.T
+
+    def update(self, gps_measurement):
+        px, py, v, psi = self.state
+        cos_psi, sin_psi = np.cos(psi), np.sin(psi)
+
+        # GPS measures position and the velocity vector
+        predicted = np.array([px, py, v * cos_psi, v * sin_psi])
+        H = np.array(
+            [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, cos_psi, -v * sin_psi],
+                [0.0, 0.0, sin_psi, v * cos_psi],
+            ]
+        )
+
+        innovation = np.array(gps_measurement) - predicted
+        innovation_covariance = H @ self.covariance @ H.T + self.gps_covariance
+        gain = np.linalg.solve(innovation_covariance, H @ self.covariance).T
+
+        self.state = self.state + gain @ innovation
+
+        # the Joseph form keeps the covariance symmetric and positive definite
+        correction = np.eye(4) - gain @ H
+        self.covariance = (
+            correction @ self.covariance @ correction.T
+            + gain @ self.gps_covariance @ gain.T
+        )
