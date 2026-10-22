@@ -1,3 +1,5 @@
+from collections import deque
+
 import numpy as np
 
 # a filter told a sensor is perfect divides by zero, so every assumed noise
@@ -90,3 +92,62 @@ class EKF:
             correction @ self.covariance @ correction.T
             + gain @ self.gps_covariance @ gain.T
         )
+
+
+class DelayCompensatedEKF:
+    """Apply each GPS fix at the moment it was taken, however late it arrives.
+
+    The filter remembers its recent states, covariances and IMU readings. A
+    late fix rewinds the filter to the step the fix was taken, corrects it
+    there, then replays the remembered IMU readings to bring the estimate
+    back to the present. With no delay this is identical to the plain EKF.
+    """
+
+    def __init__(self, ekf, history_length):
+        self.ekf = ekf
+        self.history = deque(maxlen=history_length)
+
+    @property
+    def state(self):
+        return self.ekf.state
+
+    @property
+    def covariance(self):
+        return self.ekf.covariance
+
+    def predict(self, imu_measurement, dt, time):
+        self.ekf.predict(imu_measurement, dt)
+        self.history.append(
+            [
+                time,
+                imu_measurement,
+                dt,
+                self.ekf.state.copy(),
+                self.ekf.covariance.copy(),
+            ]
+        )
+
+    def update(self, gps_measurement, measured_time):
+        # find the remembered step the fix was taken at; a fix older than the
+        # history cannot be placed and is not applied
+        steps = [
+            i
+            for i, entry in enumerate(self.history)
+            if abs(entry[0] - measured_time) < 1e-6
+        ]
+        if not steps:
+            return False
+
+        # rewind, correct at the time of the fix, then replay to the present
+        start = steps[0]
+        self.ekf.state = self.history[start][3].copy()
+        self.ekf.covariance = self.history[start][4].copy()
+        self.ekf.update(gps_measurement)
+        self.history[start][3] = self.ekf.state.copy()
+        self.history[start][4] = self.ekf.covariance.copy()
+
+        for entry in list(self.history)[start + 1 :]:
+            self.ekf.predict(entry[1], entry[2])
+            entry[3] = self.ekf.state.copy()
+            entry[4] = self.ekf.covariance.copy()
+        return True

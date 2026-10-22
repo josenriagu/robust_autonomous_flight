@@ -7,7 +7,7 @@ from robust_flight.control.heading import HeadingController
 from robust_flight.control.speed import SpeedController
 from robust_flight.dynamics.actuator import Actuator
 from robust_flight.dynamics.aircraft import Aircraft
-from robust_flight.estimation.ekf import EKF
+from robust_flight.estimation.ekf import EKF, DelayCompensatedEKF
 from robust_flight.mission.mission import Mission
 from robust_flight.sensors.gps import GPS
 from robust_flight.sensors.imu import IMU
@@ -77,6 +77,10 @@ class ExperimentConfig:
     ekf_initial_position_std: float = 1.0
     ekf_initial_speed_std: float = 0.5
     ekf_initial_heading_std: float = np.radians(5.0)
+
+    # apply each GPS fix at the time it was taken rather than when it arrives;
+    # with no link delay both behave identically
+    ekf_delay_compensation: bool = True
 
     # the state the controller and the mission act on: "true" for the true
     # state, "gps" for the latest GPS sample, held until the next one, or
@@ -211,6 +215,13 @@ def run_experiment(config):
         position_noise=config.gps_position_noise,
         velocity_noise=config.gps_velocity_noise,
     )
+    if config.ekf_delay_compensation:
+        # remember enough steps to reach back to the oldest fix the link
+        # can deliver
+        longest_delay = config.link_delay + config.link_jitter
+        ekf = DelayCompensatedEKF(
+            ekf, history_length=int(np.ceil(longest_delay / config.dt)) + 2
+        )
     ekf_states = [ekf.state.copy()]
     ekf_covariances = [ekf.covariance.copy()]
 
@@ -218,7 +229,10 @@ def run_experiment(config):
         nonlocal gps_state, gps_discarded_count, newest_applied_time
         imu_measurement = imu.measure(applied_control)
         imu_measurements.append(imu_measurement)
-        ekf.predict(imu_measurement, config.dt)
+        if config.ekf_delay_compensation:
+            ekf.predict(imu_measurement, config.dt, time)
+        else:
+            ekf.predict(imu_measurement, config.dt)
 
         gps_measurement = gps.measure(time, state)
         if gps_measurement is not None:
@@ -234,7 +248,10 @@ def run_experiment(config):
             newest_applied_time = measured_time
             gps_ages.append(time - measured_time)
             gps_state = state_from_gps(measurement)
-            ekf.update(measurement)
+            if config.ekf_delay_compensation:
+                ekf.update(measurement, measured_time)
+            else:
+                ekf.update(measurement)
 
         ekf_states.append(ekf.state.copy())
         ekf_covariances.append(ekf.covariance.copy())
