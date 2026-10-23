@@ -7,6 +7,10 @@ from matplotlib.ticker import FormatStrFormatter, LogLocator, NullFormatter
 from robust_flight.experiments.robustness import FEEDBACK, RESULTS_DIR, SWEEPS
 from robust_flight.experiments.runner import ExperimentConfig, run_experiment
 
+# a panel uses a log scale only when its values span more than this ratio;
+# narrower ranges read better on a linear scale with evenly spaced labels
+LOG_RANGE = 5.0
+
 MARKERS = {"Held GPS": "o", "Naive EKF": "s", "EKF": "^", "Bias EKF": "D"}
 
 
@@ -29,6 +33,7 @@ def plot_metric(rows, metric, ylabel, title, reference=None, log=False, scale=1.
 
     for axis, (sweep, label, levels, _) in zip(axes, SWEEPS):
         positions = np.arange(len(levels))
+        panel_means = []
 
         for feedback, _ in FEEDBACK:
             means, spreads = [], []
@@ -42,6 +47,7 @@ def plot_metric(rows, metric, ylabel, title, reference=None, log=False, scale=1.
                 ]
                 means.append(np.mean(values))
                 spreads.append(np.std(values))
+            panel_means.extend(means)
             # a spread is meaningless for a completion rate and would run
             # past 0 and 100%
             axis.errorbar(
@@ -58,12 +64,18 @@ def plot_metric(rows, metric, ylabel, title, reference=None, log=False, scale=1.
         axis.set_xticks(positions, [f"{level:g}" for level in levels])
         axis.set_xlabel(label)
         axis.set_ylabel(ylabel)
-        if log:
+        if log and max(panel_means) > LOG_RANGE * min(panel_means):
             axis.set_yscale("log")
             # label 1, 2 and 5 in each decade as plain numbers, nothing between
             axis.yaxis.set_major_locator(LogLocator(base=10, subs=(1.0, 2.0, 5.0)))
             axis.yaxis.set_major_formatter(FormatStrFormatter("%g"))
             axis.yaxis.set_minor_formatter(NullFormatter())
+            # start the axis at a labelled tick, so a number sits below the
+            # lowest line
+            bottom = axis.get_ylim()[0]
+            decade = 10 ** np.floor(np.log10(bottom))
+            tick = max(t * decade for t in (1.0, 2.0, 5.0) if t * decade <= bottom)
+            axis.set_ylim(bottom=tick)
         if metric == "mission_complete":
             axis.set_ylim(-5, 105)
         axis.grid(True, which="both", alpha=0.4)
