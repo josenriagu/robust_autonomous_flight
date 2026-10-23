@@ -116,6 +116,8 @@ class ExperimentResult:
     max_observed_acceleration: float
     final_time: float
     mission_complete: bool
+    capture_miss_distances: np.ndarray
+    max_capture_miss: float
     acceleration_saturation_rate: float
     turn_rate_saturation_rate: float
     max_acceleration_intervention: float
@@ -306,9 +308,17 @@ def run_experiment(config):
         turn_rate = heading_controller.control(heading_error)
         return np.array([acceleration, turn_rate])
 
+    # how far the aircraft truly was from each waypoint at the moment it
+    # believed it had reached it
+    capture_miss_distances = []
+
     # waypoints are reached by the position the aircraft believes it is at
     def termination_condition(true_state):
-        mission.update(believed_state(true_state)[:2])
+        waypoint = mission.current_waypoint()
+        if mission.update(believed_state(true_state)[:2]):
+            capture_miss_distances.append(
+                float(np.linalg.norm(true_state[:2] - waypoint))
+            )
         return mission.is_mission_complete()
 
     simulation = simulate(
@@ -421,6 +431,10 @@ def run_experiment(config):
         max_observed_acceleration=float(np.max(observed_accelerations)),
         final_time=float((len(history) - 1) * dt),
         mission_complete=mission.is_mission_complete(),
+        capture_miss_distances=np.array(capture_miss_distances),
+        max_capture_miss=(
+            max(capture_miss_distances) if capture_miss_distances else float("nan")
+        ),
         acceleration_saturation_rate=float(np.mean(control_difference[:, 0] != 0.0)),
         turn_rate_saturation_rate=float(np.mean(control_difference[:, 1] != 0.0)),
         max_acceleration_intervention=float(np.max(acceleration_intervention)),

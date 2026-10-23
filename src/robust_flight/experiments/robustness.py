@@ -24,6 +24,41 @@ def outage(length):
     return {"link_outages": ((OUTAGE_START, OUTAGE_START + length),)} if length else {}
 
 
+def gps_bias(size):
+    # a constant offset of this size, pointing 45° between the x and y axes
+    return {"gps_position_bias": (size / np.sqrt(2.0), size / np.sqrt(2.0))}
+
+
+# realistic bad days, with several degradations at once
+PRESETS = {
+    1: {
+        "gps_position_noise": 2.0,
+        "link_delay": 0.25,
+        "link_jitter": 0.1,
+        "link_loss_probability": 0.1,
+    },
+    2: {
+        "gps_position_noise": 4.0,
+        "link_delay": 0.5,
+        "link_jitter": 0.2,
+        "link_loss_probability": 0.25,
+        **outage(5.0),
+    },
+    3: {
+        "gps_position_noise": 8.0,
+        "link_delay": 1.0,
+        "link_jitter": 0.4,
+        "link_loss_probability": 0.5,
+        "imu_acceleration_bias": 0.1,
+        **outage(10.0),
+    },
+}
+
+# sensor noise crossed with link delay, one sweep of delay per noise level
+GRID_NOISE = [1.0, 2.0, 4.0, 8.0]
+GRID_DELAY = [0.0, 0.5, 1.0, 2.0]
+
+
 # each sweep changes one kind of degradation and holds the rest at baseline
 SWEEPS = [
     (
@@ -68,6 +103,42 @@ SWEEPS = [
         [0.0, 0.05, 0.1, 0.2],
         lambda level: {"imu_acceleration_bias": level},
     ),
+    (
+        "gps_bias",
+        "GPS position bias (m)",
+        [0.0, 1.0, 2.0, 5.0],
+        gps_bias,
+    ),
+    (
+        "gps_rate",
+        "GPS update rate (Hz)",
+        [1.0, 2.0, 5.0, 10.0],
+        lambda level: {"gps_rate": level},
+    ),
+    (
+        "speed_gain",
+        "Speed controller gain at 4 m GPS noise",
+        [0.5, 1.0, 2.0],
+        lambda level: {"speed_kp": level, "gps_position_noise": 4.0},
+    ),
+]
+
+# experiments with several degradations at once
+COMBINED = [
+    (
+        f"delay_at_noise_{noise:g}",
+        f"Link delay (s) at {noise:g} m GPS noise",
+        GRID_DELAY,
+        lambda level, noise=noise: {"gps_position_noise": noise, "link_delay": level},
+    )
+    for noise in GRID_NOISE
+] + [
+    (
+        "preset",
+        "Bad-day preset (1 mild, 2 moderate, 3 severe)",
+        [1.0, 2.0, 3.0],
+        lambda level: PRESETS[int(level)],
+    ),
 ]
 
 METRICS = [
@@ -81,6 +152,10 @@ METRICS = [
     "ekf_nees",
     "gps_lost_count",
     "gps_discarded_count",
+    "speed_rmse",
+    "acceleration_effort",
+    "turn_rate_effort",
+    "max_capture_miss",
 ]
 
 # after an outage, navigation counts as recovered once the controller's
@@ -119,7 +194,7 @@ def run_summary(config):
 
 def build_runs(baseline):
     runs = []
-    for sweep, _, levels, settings in SWEEPS:
+    for sweep, _, levels, settings in SWEEPS + COMBINED:
         for level in levels:
             for feedback, feedback_settings in FEEDBACK:
                 for seed in SEEDS:
@@ -213,7 +288,7 @@ def main():
     ]
     save_rows(rows, RESULTS_DIR / "robustness.csv")
 
-    for sweep, title, _, _ in SWEEPS:
+    for sweep, title, _, _ in SWEEPS + COMBINED:
         print_sweep(
             f"{title}, {len(SEEDS)} seeds (mean ± standard deviation)",
             [row for row in rows if row["sweep"] == sweep],
