@@ -2,12 +2,12 @@ import csv
 
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.ticker import ScalarFormatter
+from matplotlib.ticker import FormatStrFormatter, LogLocator, NullFormatter
 
 from robust_flight.experiments.robustness import FEEDBACK, RESULTS_DIR, SWEEPS
 from robust_flight.experiments.runner import ExperimentConfig, run_experiment
 
-MARKERS = {"Held GPS": "o", "Naive EKF": "s", "EKF": "^"}
+MARKERS = {"Held GPS": "o", "Naive EKF": "s", "EKF": "^", "Bias EKF": "D"}
 
 
 def load_rows(path):
@@ -60,8 +60,10 @@ def plot_metric(rows, metric, ylabel, title, reference=None, log=False, scale=1.
         axis.set_ylabel(ylabel)
         if log:
             axis.set_yscale("log")
-            axis.yaxis.set_major_formatter(ScalarFormatter())
-            axis.yaxis.set_minor_formatter(ScalarFormatter())
+            # label 1, 2 and 5 in each decade as plain numbers, nothing between
+            axis.yaxis.set_major_locator(LogLocator(base=10, subs=(1.0, 2.0, 5.0)))
+            axis.yaxis.set_major_formatter(FormatStrFormatter("%g"))
+            axis.yaxis.set_minor_formatter(NullFormatter())
         if metric == "mission_complete":
             axis.set_ylim(-5, 105)
         axis.grid(True, which="both", alpha=0.4)

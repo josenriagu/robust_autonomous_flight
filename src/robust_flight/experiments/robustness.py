@@ -16,6 +16,7 @@ FEEDBACK = [
     ("Held GPS", {"feedback": "gps"}),
     ("Naive EKF", {"feedback": "ekf", "ekf_delay_compensation": False}),
     ("EKF", {"feedback": "ekf"}),
+    ("Bias EKF", {"feedback": "ekf", "ekf_estimate_imu_bias": True}),
 ]
 
 
@@ -82,11 +83,38 @@ METRICS = [
     "gps_discarded_count",
 ]
 
+# after an outage, navigation counts as recovered once the controller's
+# position error is back within this multiple of its typical value before it
+RECOVERY_FACTOR = 2.0
+
+
+def recovery_time(result):
+    # time from the end of an outage until the position error the controller
+    # sees is back within RECOVERY_FACTOR of its median before the outage;
+    # nan without an outage, or if it never recovers before the run ends
+    if not result.config.link_outages:
+        return float("nan")
+    start, end = result.config.link_outages[0]
+    dt = result.config.dt
+    errors = np.linalg.norm(
+        result.feedback_states[:, :2] - result.history[:-1, :2], axis=1
+    )
+    times = np.arange(len(errors)) * dt
+    before = errors[times < start]
+    after = np.flatnonzero(
+        (times >= end) & (errors <= RECOVERY_FACTOR * np.median(before))
+    )
+    if len(before) == 0 or len(after) == 0:
+        return float("nan")
+    return float(times[after[0]] - end)
+
 
 def run_summary(config):
     # runs in a worker process, so only the scalar metrics travel back
     result = run_experiment(config)
-    return {name: getattr(result, name) for name in METRICS}
+    summary = {name: getattr(result, name) for name in METRICS}
+    summary["recovery_time"] = recovery_time(result)
+    return summary
 
 
 def build_runs(baseline):
@@ -114,17 +142,34 @@ def save_rows(rows, path):
     path.parent.mkdir(exist_ok=True)
     with open(path, "w", newline="") as file:
         writer = csv.DictWriter(
-            file, fieldnames=["sweep", "level", "feedback", "seed", *METRICS]
+            file,
+            fieldnames=[
+                "sweep",
+                "level",
+                "feedback",
+                "seed",
+                *METRICS,
+                "recovery_time",
+            ],
         )
         writer.writeheader()
         writer.writerows(rows)
+
+
+def recovery_summary(group):
+    times = np.array([r["recovery_time"] for r in group])
+    if np.all(np.isnan(times)):
+        return "-"
+    recovered = ~np.isnan(times)
+    return f"{np.mean(times[recovered]):.2f} ({recovered.sum()}/{len(times)})"
 
 
 def print_sweep(title, rows, reference):
     print(f"\n{title}")
     print(
         f"{'Level':>7} {'Feedback':>10} {'Done':>6} {'Time (s)':>16} "
-        f"{'XTE RMSE (m)':>16} {'Position err. (m)':>18} {'NEES':>9}"
+        f"{'XTE RMSE (m)':>16} {'Position err. (m)':>18} {'NEES':>9} "
+        f"{'Recovery (s)':>13}"
     )
 
     for level in dict.fromkeys(row["level"] for row in rows):
@@ -142,7 +187,8 @@ def print_sweep(title, rows, reference):
                 f"{level:>7g} {feedback:>10} {done:>3}/{len(group):<2} "
                 f"{stat('final_time')} {stat('cross_track_rmse')} "
                 f"{stat('feedback_position_rmse'):>18} "
-                f"{np.mean([r['ekf_nees'] for r in group]):>9.2f}"
+                f"{np.mean([r['ekf_nees'] for r in group]):>9.2f} "
+                f"{recovery_summary(group):>13}"
             )
 
     print(
