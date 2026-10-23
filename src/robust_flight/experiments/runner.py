@@ -82,6 +82,12 @@ class ExperimentConfig:
     # with no link delay both behave identically
     ekf_delay_compensation: bool = True
 
+    # estimate the IMU biases as two extra EKF states, starting from zero
+    # with this uncertainty, in m/s² and rad/s
+    ekf_estimate_imu_bias: bool = False
+    ekf_initial_acceleration_bias_std: float = 0.1
+    ekf_initial_yaw_rate_bias_std: float = 0.01
+
     # the state the controller and the mission act on: "true" for the true
     # state, "gps" for the latest GPS sample, held until the next one, or
     # "ekf" for the EKF estimate
@@ -138,6 +144,7 @@ class ExperimentResult:
     ekf_speed_rmse: float
     ekf_heading_rmse: float
     ekf_nees: float
+    ekf_bias_estimates: np.ndarray
 
 
 def run_experiment(config):
@@ -214,6 +221,11 @@ def run_experiment(config):
         yaw_rate_noise=config.imu_yaw_rate_noise,
         position_noise=config.gps_position_noise,
         velocity_noise=config.gps_velocity_noise,
+        estimate_imu_bias=config.ekf_estimate_imu_bias,
+        initial_bias_std=(
+            config.ekf_initial_acceleration_bias_std,
+            config.ekf_initial_yaw_rate_bias_std,
+        ),
     )
     if config.ekf_delay_compensation:
         # remember enough steps to reach back to the oldest fix the link
@@ -222,8 +234,11 @@ def run_experiment(config):
         ekf = DelayCompensatedEKF(
             ekf, history_length=int(np.ceil(longest_delay / config.dt)) + 2
         )
-    ekf_states = [ekf.state.copy()]
-    ekf_covariances = [ekf.covariance.copy()]
+    # the navigation states [px, py, v, psi] are recorded apart from any bias
+    # estimates, so every filter is scored on the same four states
+    ekf_states = [ekf.state[:4].copy()]
+    ekf_covariances = [ekf.covariance[:4, :4].copy()]
+    ekf_bias_estimates = [ekf.state[4:].copy()]
 
     def record_measurements(time, state, applied_control):
         nonlocal gps_state, gps_discarded_count, newest_applied_time
@@ -253,14 +268,15 @@ def run_experiment(config):
             else:
                 ekf.update(measurement)
 
-        ekf_states.append(ekf.state.copy())
-        ekf_covariances.append(ekf.covariance.copy())
+        ekf_states.append(ekf.state[:4].copy())
+        ekf_covariances.append(ekf.covariance[:4, :4].copy())
+        ekf_bias_estimates.append(ekf.state[4:].copy())
 
     def believed_state(true_state):
         if config.feedback == "gps":
             return gps_state
         if config.feedback == "ekf":
-            return ekf.state.copy()
+            return ekf.state[:4].copy()
         return true_state
 
     # index of the waypoint the controller steered towards at each step, and
@@ -433,6 +449,7 @@ def run_experiment(config):
         ekf_speed_rmse=float(np.sqrt(np.mean(ekf_errors[:, 2] ** 2))),
         ekf_heading_rmse=float(np.sqrt(np.mean(ekf_errors[:, 3] ** 2))),
         ekf_nees=float(np.mean(ekf_nees[1:])),
+        ekf_bias_estimates=np.array(ekf_bias_estimates),
     )
 
 

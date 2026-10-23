@@ -6,6 +6,11 @@ import numpy as np
 # level is at least this small value
 MIN_NOISE = 1e-6
 
+# how fast the IMU biases may wander when they are estimated, per square root
+# of a second; small, so the filter treats them as nearly constant
+ACCELERATION_BIAS_DRIFT = 1e-3
+YAW_RATE_BIAS_DRIFT = 1e-4
+
 
 class EKF:
     """Estimate the aircraft state [px, py, v, psi] from IMU and GPS.
@@ -14,6 +19,11 @@ class EKF:
     follows, driven by the measured acceleration and yaw rate. Each GPS
     sample of position and velocity then corrects the prediction. The
     filter assumes the noise levels it is given are the sensors' true ones.
+
+    With estimate_imu_bias, the state gains the accelerometer and gyro
+    biases [b_a, b_r], which are subtracted from the IMU readings. GPS
+    velocity reveals them: a bias makes the predicted speed or heading
+    drift steadily away from what GPS measures.
     """
 
     def __init__(
@@ -24,9 +34,21 @@ class EKF:
         yaw_rate_noise,
         position_noise,
         velocity_noise,
+        estimate_imu_bias=False,
+        initial_bias_std=(0.1, 0.01),
     ):
+        self.estimate_imu_bias = estimate_imu_bias
         self.state = np.array(initial_state, dtype=float)
         self.covariance = np.array(initial_covariance, dtype=float)
+
+        # the biases start at zero with the given uncertainty
+        if estimate_imu_bias:
+            self.state = np.concatenate([self.state, [0.0, 0.0]])
+            covariance = np.zeros((6, 6))
+            covariance[:4, :4] = self.covariance
+            covariance[4, 4] = initial_bias_std[0] ** 2
+            covariance[5, 5] = initial_bias_std[1] ** 2
+            self.covariance = covariance
 
         acceleration_noise, yaw_rate_noise, position_noise, velocity_noise = (
             max(noise, MIN_NOISE)
@@ -43,42 +65,53 @@ class EKF:
         )
 
     def predict(self, imu_measurement, dt):
-        px, py, v, psi = self.state
+        px, py, v, psi = self.state[:4]
         acceleration, yaw_rate = imu_measurement
         cos_psi, sin_psi = np.cos(psi), np.sin(psi)
+        size = len(self.state)
 
-        self.state = self.state + dt * np.array(
-            [v * cos_psi, v * sin_psi, acceleration, yaw_rate]
-        )
+        if self.estimate_imu_bias:
+            acceleration = acceleration - self.state[4]
+            yaw_rate = yaw_rate - self.state[5]
+
+        change = np.zeros(size)
+        change[:4] = [v * cos_psi, v * sin_psi, acceleration, yaw_rate]
+        self.state = self.state + dt * change
 
         # Jacobian of one step of the model with respect to the state
-        F = np.eye(4)
+        F = np.eye(size)
         F[0, 2] = dt * cos_psi
         F[0, 3] = -dt * v * sin_psi
         F[1, 2] = dt * sin_psi
         F[1, 3] = dt * v * cos_psi
+        if self.estimate_imu_bias:
+            F[2, 4] = -dt
+            F[3, 5] = -dt
 
         # IMU noise enters speed and heading through one time step
-        G = np.zeros((4, 2))
+        G = np.zeros((size, 2))
         G[2, 0] = dt
         G[3, 1] = dt
 
         self.covariance = F @ self.covariance @ F.T + G @ self.imu_covariance @ G.T
+        if self.estimate_imu_bias:
+            self.covariance[4, 4] += ACCELERATION_BIAS_DRIFT**2 * dt
+            self.covariance[5, 5] += YAW_RATE_BIAS_DRIFT**2 * dt
 
     def update(self, gps_measurement):
-        px, py, v, psi = self.state
+        px, py, v, psi = self.state[:4]
         cos_psi, sin_psi = np.cos(psi), np.sin(psi)
+        size = len(self.state)
 
-        # GPS measures position and the velocity vector
+        # GPS measures position and the velocity vector, never the biases
         predicted = np.array([px, py, v * cos_psi, v * sin_psi])
-        H = np.array(
-            [
-                [1.0, 0.0, 0.0, 0.0],
-                [0.0, 1.0, 0.0, 0.0],
-                [0.0, 0.0, cos_psi, -v * sin_psi],
-                [0.0, 0.0, sin_psi, v * cos_psi],
-            ]
-        )
+        H = np.zeros((4, size))
+        H[:, :4] = [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, cos_psi, -v * sin_psi],
+            [0.0, 0.0, sin_psi, v * cos_psi],
+        ]
 
         innovation = np.array(gps_measurement) - predicted
         innovation_covariance = H @ self.covariance @ H.T + self.gps_covariance
@@ -87,7 +120,7 @@ class EKF:
         self.state = self.state + gain @ innovation
 
         # the Joseph form keeps the covariance symmetric and positive definite
-        correction = np.eye(4) - gain @ H
+        correction = np.eye(size) - gain @ H
         self.covariance = (
             correction @ self.covariance @ correction.T
             + gain @ self.gps_covariance @ gain.T
