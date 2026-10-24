@@ -22,17 +22,23 @@ The project will progressively introduce realistic sources of uncertainty into a
 
 ## Key Findings
 
-From 2,640 simulated flights of a 50 m square mission: seven kinds of degradation, each at four or five levels, four navigation options, and 20 random seeds per condition. Every result reproduces exactly from the committed code.
+From 5,040 simulated flights of a 50 m square mission: ten kinds of degradation one at a time, GPS noise crossed with link delay, and three combined "bad day" scenarios, each flown with four navigation options and 20 random seeds. Every result reproduces exactly from the committed code.
 
-1. **Without state estimation, moderate degradation stops the mission.** Steering on the latest GPS fix, mission completion falls to 65% with 2 m of GPS noise, 50% with half the fixes dropped, 55% with a 1 s link delay, 60% with half the packets lost, and 50% after a 20 s outage.
-2. **With an Extended Kalman Filter (EKF), every mission completes.** All 1,980 EKF flights finished. Away from IMU bias, the delay-compensated EKF tracked the path within 0.03 m of an aircraft that knows its true state, up to 8 m of GPS noise, 90% of fixes or packets lost, or a 20 s outage.
-3. **Link delay is what defeats a naive filter, and compensating for it removes the penalty.** Applying late fixes as if they were current, a 1 s delay raises the EKF's position error from 0.23 m to 7.0 m and makes it badly overconfident. Applying each fix at the moment it was taken keeps the error at 0.24 m at 1 s and 0.25 m at 2 s, with consistent uncertainty.
-4. **IMU bias breaks the standard EKF, and estimating the bias fixes it.** A 0.2 m/s² accelerometer bias pushes the four-state EKF's error to 3.8 m. Two extra filter states that estimate the biases hold it at 0.24 m at every bias level tested, at a small cost when GPS is scarce.
-5. **Waypoint capture must be sized against navigation error.** Steering on raw GPS with 1 m of noise and a 1 m capture radius, the aircraft misses waypoints and loops back, and missions take 44% longer. A 2 m radius removes the extra time.
+A mission counts as **truly complete** when the aircraft actually passed every waypoint within 2 m, twice the arrival radius, not merely when it believed it had. Every comparison below holds at any tolerance from 1.5 m to 3 m.
+
+1. **Without state estimation, degradation stops the aircraft from truly reaching its waypoints.** Steering on the latest GPS fix, no mission truly completed, at any tolerance, with 4 m of GPS noise, a 1 s link delay, 90% of fixes dropped or lost, or 4 m of noise combined with any delay. Even at baseline it passed waypoints about 1.6 times as far off as with an EKF (median worst miss 1.90 m against 1.15 m).
+2. **A delay-compensated Extended Kalman Filter (EKF) reaches the waypoints under the same conditions.** It truly completed every mission, at any tolerance, with up to 2 s of link delay, 0.8 s of jitter, half the fixes dropped, or a 10 s outage. In every single-factor sweep except the bias and controller-gain sweeps, its cross-track error stayed within 0.03 m of an aircraft that knows its true state.
+3. **For the compensated EKF, GPS noise and link delay do not compound.** Its position error depends almost entirely on the GPS noise, changing by at most 0.02 m between no delay and 2 s. A filter that applies late fixes as if they were current truly completes nothing at 1 s of delay or more, at any noise level, and its NEES shows it to be badly overconfident.
+4. **IMU bias breaks the standard EKF, and estimating the bias fixes it.** A 0.05 m/s² accelerometer bias makes the four-state EKF miss waypoints by 2.6 m, and from 0.1 m/s² it truly completes no mission at any tolerance. Two extra filter states that estimate the biases truly complete every mission at every bias level tested.
+5. **A GPS bias defeats every navigation option.** GPS is the only absolute position reference, so no estimator can see a constant offset in it: the EKF's error simply equals the bias, and every option misses waypoints by about the bias plus the usual capture distance, 5.6 m at 5 m of bias.
+6. **When everything degrades at once, only the bias-estimating EKF keeps reaching waypoints.** Under the moderate preset, held GPS and the naive EKF truly complete at most 10% of missions at any tolerance, while the two delay-compensated EKFs complete 40% to 100%, depending on the tolerance. Under the severe preset, which adds IMU bias, every option except the bias EKF truly completes none at any tolerance; the bias EKF completes 30% to 85%, depending on the tolerance.
+7. **Retuning the controller is no substitute for estimation.** With 4 m of GPS noise, held GPS truly completed no mission at any speed gain from 0.5 to 2. Noisy feedback also makes the controller work harder: steering on held GPS takes 4.3 times the turn-rate effort of the EKF at baseline, and 13 times at 8 m of noise.
+8. **Onboard "mission complete" can hide large misses.** A filter that is confident and wrong reports success while passing waypoints metres away: 351 EKF-steered flights believed they had completed while missing a waypoint by more than 5 m, up to 26.6 m. Every result here is therefore judged on true miss distance, measured against the true path.
+9. **Waypoint capture must be sized against navigation error.** Steering on raw GPS with 1 m of noise and a 1 m capture radius, the aircraft misses waypoints and loops back, and missions take 44% longer. A 2 m radius removes the extra time.
 
 These findings come from a planar kinematic model with simulated sensors on a single mission. They show how the effects behave and compare, not validated aircraft performance.
 
-![Path tracking under degradation](results/robustness_tracking.png)
+![Mission completion under degradation](results/robustness_completion.png)
 
 ---
 
@@ -142,7 +148,9 @@ results/
 ├── robustness.csv
 ├── robustness_completion.png
 ├── robustness_tracking.png
-└── robustness_estimation.png
+├── robustness_estimation.png
+├── robustness_combined.png
+└── robustness_presets.png
 ```
 
 ### Design Principles
@@ -216,7 +224,7 @@ Compare steering on the true state, the latest GPS fix and the EKF estimate over
 python -m robust_flight.experiments.feedback_comparison
 ```
 
-Run the robustness sweep, which flies all 2,640 cases in parallel and saves `results/robustness.csv` (about three minutes on 12 cores):
+Run the robustness sweep, which flies all 5,040 cases in parallel and saves `results/robustness.csv` (about six minutes on 12 cores):
 
 ```bash
 python -m robust_flight.experiments.robustness
@@ -230,7 +238,7 @@ python -m robust_flight.experiments.robustness_plots
 
 Each plot window must be closed before the next one opens.
 
-Run the test suite (46 tests, about 10 seconds):
+Run the test suite (56 tests, about 15 seconds):
 
 ```bash
 pytest
@@ -636,6 +644,7 @@ These figures come from the original single-waypoint scenario (waypoint `(50, 30
 |---|---|---|
 | Mission | mission completed | `mission_complete` |
 | Mission | elapsed simulation time | `final_time` |
+| Mission | true distance from each waypoint at the moment it was captured | `capture_miss_distances`, `max_capture_miss` |
 | Path tracking | cross-track RMSE and maximum | `cross_track_rmse`, `max_cross_track_error` |
 | Speed tracking | speed RMSE | `speed_rmse` |
 | Speed tracking | maximum overspeed | `max_overspeed` |
@@ -706,6 +715,18 @@ final_time = (len(history) - 1) * dt
 ```
 
 Metrics from an incomplete run must be read alongside `mission_complete`. An aircraft circling a waypoint at a steady speed tracks speed well, so its speed RMSE can be lower than that of a run that completes.
+
+### Believed and True Completion
+
+The mission captures a waypoint when the position the aircraft *believes* it is at comes within the arrival radius, so `mission_complete` means the aircraft believed it had visited every waypoint. A filter that is confident and wrong can tick off every waypoint while passing metres away from it.
+
+The runner therefore records, at each capture, the **true** distance from the waypoint. A mission is **truly complete** when it completed and every one of those distances is within twice the arrival radius, 2 m in the baseline. Even an aircraft steering on its true state captures at just under 1 m, and good navigation at about 1.1 to 1.4 m, so 2 m separates genuine arrivals from confident misses of several metres.
+
+The tolerance is a choice, so the results report the true miss distance itself as well, and test every headline comparison at 1.5 m, 2 m and 3 m. Absolute completion rates move with the tolerance; the ranking of the navigation options does not.
+
+### Settling Time
+
+Settling time is not reported. The mission turns at every corner and the desired speed changes continuously, so the aircraft never settles into a steady state against which a settling time could be measured. Cross-track error, speed error and outage recovery cover what it would describe.
 
 ### Navigation Error
 
@@ -815,7 +836,7 @@ These results answer the research question. Each condition was flown with 20 ran
 - **EKF:** the EKF with delay compensation, the default
 - **Bias EKF:** the delay-compensated EKF with IMU bias estimation
 
-The reference is the same aircraft steering on its true state: 25.84 s and 2.454 m of cross-track RMSE. Naive EKF and EKF are identical wherever the link has no delay.
+The reference is the same aircraft steering on its true state: 25.84 s and 2.454 m of cross-track RMSE. Naive EKF and EKF are identical wherever the link has no delay. Completion is reported both as believed onboard and as truly complete within 2 m, as defined in [Believed and True Completion](#believed-and-true-completion).
 
 Every number here regenerates exactly:
 
@@ -869,19 +890,43 @@ for radius in (1.0, 2.0, 3.0):
 
 ### Mission Completion
 
-Missions completed out of 20 when steering on held GPS:
+Missions completed out of 20, as believed onboard / truly within 2 m:
 
-| Degradation | Levels and completion |
-|---|---|
-| GPS position noise (m) | 0.5: 19 · 1: 20 · 2: **13** · 4: **4** · 8: **0** |
-| GPS dropout | 0: 20 · 0.25: 19 · 0.5: **10** · 0.75: **1** · 0.9: **0** |
-| Link delay (s) | 0: 20 · 0.25: 19 · 0.5: 17 · 1: **11** · 2: **0** |
-| Link jitter on a 0.1 s delay (s) | 0: 18 · 0.2: 19 · 0.4: 18 · 0.8: 17 |
-| Packet loss | 0: 20 · 0.25: 19 · 0.5: **12** · 0.75: **2** · 0.9: **0** |
-| Outage from 8 s (s) | 0: 20 · 2: 20 · 5: 19 · 10: 18 · 20: **10** |
-| IMU acceleration bias (m/s²) | 20 at every level, since held GPS does not use the IMU |
+| Degradation | Level | Held GPS | Naive EKF | EKF | Bias EKF |
+|---|---:|---:|---:|---:|---:|
+| Baseline | | 20 / 11 | 20 / 20 | 20 / 20 | 20 / 20 |
+| GPS noise (m) | 2 | 13 / 0 | 20 / 20 | 20 / 20 | 20 / 20 |
+| | 8 | 0 / 0 | 20 / 18 | 20 / 18 | 20 / 18 |
+| GPS dropout | 0.5 | 10 / 3 | 20 / 20 | 20 / 20 | 20 / 20 |
+| | 0.9 | 0 / 0 | 20 / 20 | 20 / 20 | 20 / 19 |
+| Link delay (s) | 0.5 | 17 / 1 | 20 / 1 | 20 / 20 | 20 / 20 |
+| | 2 | 0 / 0 | 20 / 0 | 20 / 20 | 20 / 20 |
+| Packet loss | 0.5 | 12 / 3 | 20 / 20 | 20 / 20 | 20 / 20 |
+| | 0.9 | 0 / 0 | 20 / 20 | 20 / 20 | 20 / 18 |
+| Outage (s) | 10 | 18 / 13 | 20 / 20 | 20 / 20 | 20 / 20 |
+| | 20 | 10 / 4 | 20 / 20 | 20 / 20 | 20 / 18 |
+| IMU bias (m/s²) | 0.05 | 20 / 11 | 20 / 0 | 20 / 0 | 20 / 20 |
 
-All 1,980 flights steered by any of the three EKFs completed. All 195 incomplete flights steered on held GPS, and each ran the full 60 s without finishing.
+The gap between the two numbers is the cost of judging arrival by belief. Held GPS believed it completed every baseline mission but truly completed 11; the four-state EKF under IMU bias believed it completed all 20 and truly completed none.
+
+Truly complete (%) at three tolerances, 1.5 m / 2 m / 3 m:
+
+| Condition | Held GPS | Naive EKF | EKF | Bias EKF |
+|---|---|---|---|---|
+| Baseline | 25 / 55 / 95 | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 100 / 100 |
+| GPS noise 4 m | 0 / 0 / 0 | 55 / 95 / 100 | 55 / 95 / 100 | 55 / 90 / 100 |
+| Dropout 50% | 0 / 15 / 40 | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 100 / 100 |
+| Delay 1 s | 0 / 0 / 0 | 0 / 0 / 0 | 100 / 100 / 100 | 100 / 100 / 100 |
+| Loss 50% | 0 / 15 / 55 | 90 / 100 / 100 | 90 / 100 / 100 | 90 / 100 / 100 |
+| Outage 10 s | 30 / 65 / 90 | 100 / 100 / 100 | 100 / 100 / 100 | 100 / 100 / 100 |
+| IMU bias 0.1 m/s² | 25 / 55 / 95 | 0 / 0 / 0 | 0 / 0 / 0 | 100 / 100 / 100 |
+| GPS bias 2 m | 0 / 0 / 25 | 0 / 0 / 90 | 0 / 0 / 90 | 0 / 0 / 90 |
+| GPS at 1 Hz | 0 / 5 / 10 | 70 / 100 / 100 | 70 / 100 / 100 | 70 / 100 / 100 |
+| 4 m noise and 1 s delay | 0 / 0 / 0 | 0 / 0 / 0 | 45 / 100 / 100 | 55 / 100 / 100 |
+| Moderate preset | 0 / 0 / 0 | 0 / 0 / 10 | 60 / 80 / 100 | 40 / 95 / 100 |
+| Severe preset | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 | 30 / 55 / 85 |
+
+Absolute rates depend on the tolerance: held GPS at baseline reads 25%, 55% or 95%. The ranking does not: at every tolerance and in every condition the delay-compensated EKF does at least as well as held GPS, except the four-state filter under IMU bias, which is the weakness the bias filter removes. The headline findings use only comparisons that hold at all three tolerances.
 
 ![Mission completion under degradation](results/robustness_completion.png)
 
@@ -898,8 +943,10 @@ Cross-track RMSE at the most severe level of each sweep:
 | Packet loss 90% | 9.22 | 2.44 | 2.44 | 2.47 |
 | Outage 20 s | 58.76 | 2.46 | 2.46 | 2.58 |
 | IMU bias 0.2 m/s² | 2.92 | 2.13 | 2.13 | 2.45 |
+| GPS bias 5 m | 3.86 | 3.44 | 3.44 | 3.45 |
+| GPS at 1 Hz | 2.54 | 2.47 | 2.47 | 2.48 |
 
-Outside the IMU bias sweep, the EKF's cross-track RMSE stays within 0.022 m of the true-state reference at every level of every sweep.
+Outside the bias and controller-gain sweeps, the EKF's cross-track RMSE stays within 0.022 m of the true-state reference at every level of every single-factor sweep, and within 0.034 m across the noise and delay grid.
 
 ![Path tracking under degradation](results/robustness_tracking.png)
 
@@ -982,9 +1029,94 @@ Time from the end of an outage until the controller's position error is back wit
 
 Three things matter when reading this table:
 
-- Held GPS recovers instantly by this measure because its error drops back the moment a fix arrives. The damage is already done by then: at 10 s and 20 s it completes only 18 and 10 missions out of 20, with 21 m and 59 m of cross-track RMSE.
+- Held GPS recovers instantly by this measure because its error drops back the moment a fix arrives. The damage is already done by then: at 10 s and 20 s it believes it completed 18 and 10 missions out of 20 and truly completed 13 and 4, with 21 m and 59 m of cross-track RMSE.
 - The EKFs barely leave their normal error band. For outages up to 5 s, IMU-only prediction stays within twice the normal error, and after 10 s without GPS the filter is back within 0.3–0.4 s of GPS returning.
-- At 20 s the outage runs from 8 s to 28 s, beyond the end of the mission at about 26 s. The EKF flew the last 18 s on the IMU alone and completed every mission, so GPS never returned and there was nothing to recover from.
+- At 20 s the outage runs from 8 s to 28 s, beyond the end of the mission at about 26 s. The EKF flew the last 18 s on the IMU alone and truly completed every mission, so GPS never returned and there was nothing to recover from.
+
+### GPS Bias
+
+A constant offset in every GPS position, pointing 45° between the axes:
+
+| Bias (m) | EKF error (m) | EKF NEES | EKF worst true miss (m) | Truly complete, EKF | Truly complete, held GPS |
+|---:|---:|---:|---:|---:|---:|
+| 0 | 0.23 | 3.6 | 1.16 | 20 | 11 |
+| 1 | 0.99 | 57 | 1.86 | 18 | 4 |
+| 2 | 1.95 | 218 | 2.76 | 0 | 0 |
+| 5 | 4.83 | 1,340 | 5.61 | 0 | 0 |
+
+GPS is the filter's only absolute position reference, so a constant offset in it is invisible: the EKF follows the biased GPS faithfully, its error equals the bias, and its NEES rises because it reports itself as accurate. The bias filter does not help, since it estimates IMU biases, not GPS ones. Removing a GPS bias needs a second absolute reference, such as a known landmark or differential corrections.
+
+### GPS Update Rate
+
+| GPS rate (Hz) | Held GPS truly complete | Held GPS error (m) | EKF truly complete | EKF error (m) |
+|---:|---:|---:|---:|---:|
+| 1 | 1 | 3.26 | 20 | 0.42 |
+| 2 | 1 | 2.19 | 20 | 0.33 |
+| 5 | 11 | 1.60 | 20 | 0.23 |
+| 10 | 14 | 1.44 | 20 | 0.18 |
+
+Held GPS depends heavily on the update rate, because each fix is held for longer between updates. The EKF predicts between fixes with the IMU, so even at 1 Hz it truly completes every mission, with an error lower than held GPS achieves at 10 Hz.
+
+### Controller Gain and Control Effort
+
+The speed controller gain, varied with 4 m of GPS noise:
+
+| Speed gain | Held GPS truly complete | Held GPS cross-track (m) | EKF truly complete | EKF cross-track (m) | EKF time (s) |
+|---:|---:|---:|---:|---:|---:|
+| 0.5 | 0 | 5.52 | 19 | 3.20 | 23.91 |
+| 1 | 0 | 5.18 | 19 | 2.46 | 25.85 |
+| 2 | 0 | 5.36 | 19 | 1.81 | 28.63 |
+
+No gain lets held GPS reach the waypoints. With the EKF, the gain makes the same trade as with perfect navigation: a higher gain tracks the path more tightly and takes longer. Feedback control shapes how the aircraft flies, but it cannot make up for not knowing where it is.
+
+Noisy feedback also costs control effort. At baseline, steering on held GPS takes 4.3 times the turn-rate effort of the EKF (18.0 against 4.15); at 8 m of GPS noise, 13 times (56.2 against 4.18). The EKF's effort does not change with the noise.
+
+### GPS Noise Combined with Link Delay
+
+GPS noise of 1, 2, 4 and 8 m crossed with link delays of 0, 0.5, 1 and 2 s:
+
+![GPS noise combined with link delay](results/robustness_combined.png)
+
+- **The delay-compensated EKF is unaffected by delay at every noise level.** Its position error depends only on the noise (about 0.23, 0.37, 0.52 and 0.6 m) and it truly completes 85–100% of missions in every cell, with its few misses coming from noise alone at 4 m and 8 m.
+- **The naive EKF fails under delay at every noise level.** It truly completes no mission at 1 s or 2 s of delay, whatever the noise.
+- **Held GPS truly completes almost nothing** outside the baseline cell: 11 of 20 at 1 m and no delay, one at 1 m and 0.5 s, and none elsewhere.
+
+### Bad-Day Presets
+
+Three scenarios with several degradations at once:
+
+| Preset | GPS noise | Delay | Jitter | Packet loss | Outage | IMU bias |
+|---|---:|---:|---:|---:|---|---:|
+| Mild | 2 m | 0.25 s | 0.1 s | 10% | none | none |
+| Moderate | 4 m | 0.5 s | 0.2 s | 25% | 5 s from 8 s | none |
+| Severe | 8 m | 1 s | 0.4 s | 50% | 10 s from 8 s | 0.1 m/s² |
+
+| Preset | Held GPS | Naive EKF | EKF | Bias EKF |
+|---|---|---|---|---|
+| Mild: truly complete / worst miss | 0 / 2.94 m | 20 / 1.05 m | 20 / 1.32 m | 20 / 1.29 m |
+| Moderate: truly complete / worst miss | 0 / none done | 0 / 4.96 m | 16 / 1.59 m | 19 / 1.55 m |
+| Severe: truly complete / worst miss | 0 / none done | 0 / 12.81 m | 0 / 9.33 m | 11 / 1.85 m |
+
+Worst miss is averaged over the flights that believed they completed.
+
+![Bad-day presets](results/robustness_presets.png)
+
+Combined degradation does eventually defeat the system. Under the severe preset the four-state EKF believes it completes every mission but misses waypoints by 9.3 m, because it cannot see the IMU bias. The bias EKF is the only option that still reaches the waypoints, in 11 of 20 flights. Its other failures come from the waypoint-capture effect: after the 10 s outage its error briefly exceeds the 1 m arrival radius at a waypoint, it misses the capture, and it circles.
+
+### Failure Thresholds
+
+The smallest tested degradation at which held GPS truly completes no mission, at any tolerance from 1.5 m to 3 m:
+
+| Degradation | Held GPS fails from | Delay-compensated EKF, truly complete within 2 m |
+|---|---|---|
+| GPS noise | 4 m | 90% or more truly complete up to 8 m |
+| GPS dropout | 90% | every mission up to 90% |
+| Link delay | 1 s | every mission up to 2 s |
+| Packet loss | 90% | every mission up to 90% |
+| GPS noise with any delay | 4 m | 85% or more in every cell |
+| Bad-day preset | moderate | 80% moderate, none severe; bias EKF 55% severe |
+
+Within the tested levels the delay-compensated EKF never reaches a failure threshold for noise, dropout, delay, loss or outage. Its thresholds come from biases: IMU bias of 0.05 m/s² without bias estimation, and GPS bias of about 2 m for every filter.
 
 ### What These Results Do Not Show
 
@@ -992,6 +1124,7 @@ Three things matter when reading this table:
 - **A planar kinematic model.** There are no aerodynamics, wind or actuator dynamics, so the numbers describe how the effects compare, not real aircraft performance.
 - **Simulated sensors with simple noise.** The noise is white and Gaussian; real GPS errors are correlated in time, and real IMU biases drift.
 - **A well-tuned filter.** The EKF is told the sensors' true noise levels. A mistuned filter was not swept. During development, the consistency check flagged a filter told the noise was three times too small (NEES 34) or three times too large (NEES 0.39).
+- **Only some combinations.** GPS noise is crossed with link delay, and three presets combine everything, but other pairs, such as IMU bias with packet loss, are not swept on their own.
 - **IMU bias on the accelerometer only.** The sweep tests accelerometer bias. The bias filter also estimates gyro bias: a separate 20-seed check recovered a 0.005 rad/s gyro bias to within 3% on average, but gyro bias is not part of the sweep.
 
 ---
@@ -1004,7 +1137,7 @@ The test suite lives in `tests/` and runs with:
 pytest
 ```
 
-It holds 46 tests and takes about 10 seconds.
+It holds 56 tests and takes about 15 seconds.
 
 | File | Tests | What it checks |
 |---|---:|---|
@@ -1013,14 +1146,14 @@ It holds 46 tests and takes about 10 seconds.
 | `test_sensors.py` | 7 | GPS sampling rate, noise, bias and dropout; IMU noise and bias; repeatability under a seed |
 | `test_link.py` | 6 | exact delay, jitter bounds and reordering, outages, the loss rate, loss leaving delays unchanged |
 | `test_ekf.py` | 9 | exact reconstruction of the true path with perfect sensors for every filter variant, accuracy against GPS, consistency, delay compensation, bias recovery |
-| `test_runner.py` | 12 | the pinned baseline flight, determinism, invalid settings, and published results |
+| `test_runner.py` | 22 | the pinned baseline flight, determinism, invalid settings, true capture miss, GPS bias, and published results |
 
 Two kinds of test do different jobs:
 
 - **Property tests** check that behaviour is physically right: exact where it must be exact, consistent, and better than raw GPS.
-- **The published-results test** re-runs seven rows of `results/robustness.csv`, one from each sweep and covering all four navigation options, and requires every metric to match exactly. It catches changes that leave behaviour plausible but alter the numbers, such as a wrong Jacobian term, a different covariance update or a reordered random draw, which no property test can tell apart from the original.
+- **The published-results test** re-runs fourteen rows of `results/robustness.csv`, covering every sweep, the noise and delay grid, both harder presets and all four navigation options, and requires every metric to match exactly. It catches changes that leave behaviour plausible but alter the numbers, such as a wrong Jacobian term, a different covariance update or a reordered random draw, which no property test can tell apart from the original.
 
-Each test was checked to fail on purpose: the code was broken deliberately in 18 different ways, from re-introducing a double controller call to skipping the delay-compensation rewind. The final suite catches every one. One of them, swapping the order of two random draws in the link, at first passed every property test; the published-results test was added to catch exactly that kind of change.
+Each test was checked to fail on purpose: the code was broken deliberately in 24 different ways, from re-introducing a double controller call to skipping the delay-compensation rewind or measuring the capture miss from the believed position. The final suite catches every one. Two of them at first passed: swapping the order of two random draws in the link, which led to the published-results test, and fixing the grid's GPS noise at one level, which led to a second published grid row.
 
 ---
 
@@ -1041,6 +1174,7 @@ The current model is deliberately simplified and does not yet represent a realis
 
 - guidance aims directly at the active waypoint rather than following the path between waypoints, which leaves a cross-track error floor of about 1.33 m
 - a waypoint counts as reached only inside the arrival radius, with no pass-by switching, so an aircraft that cannot turn tightly enough, or whose navigation error is large against the radius, can circle a waypoint
+- mission completion is judged onboard by the believed position, so the results also measure the true miss at each capture
 - proportional controllers only
 - one baseline mission
 
@@ -1054,9 +1188,9 @@ The current model is deliberately simplified and does not yet represent a realis
 
 **Method**
 
-- each degradation is swept on its own, with the others at baseline; combinations are not tested
+- most degradations are swept on their own, with the others at baseline; GPS noise is crossed with link delay and three presets combine everything, but other combinations are not tested
 - 20 seeds per condition; results are means over those flights
-- the GPS update rate, gyro bias and filter tuning are configurable but not swept
+- gyro bias and filter tuning are configurable but not swept
 
 The simulation is a **controlled research model**: it shows how sensing, communication and estimation effects behave and compare, not flight-accurate aircraft performance.
 
@@ -1102,7 +1236,7 @@ Add:
 
 - [x] measurement noise
 - [x] bias
-- [x] different sensor update rates (configurable; not yet swept)
+- [x] different sensor update rates (GPS swept from 1 to 10 Hz)
 - [x] measurement dropout
 
 ### Phase 4 — Communication Uncertainty
@@ -1132,18 +1266,21 @@ Evaluate:
 - [x] nominal operation
 - [x] sensor degradation
 - [x] communication degradation
-- [ ] combined sensor/communication uncertainty
+- [x] combined sensor/communication uncertainty (GPS noise with link delay, and three combined presets)
 - [x] controller performance with estimated state
 - [x] recovery following temporary outages
 - [x] failure thresholds for missions steered without an estimator
+- [x] GPS bias, GPS update rate and controller gain under degradation
+- [x] true completion, measured from the true miss at each capture
 
 ### Future Work
 
 Beyond the phases above:
 
-- combined degradations, for example noise and delay together
+- other combinations of degradations, for example IMU bias with packet loss
 - time-correlated GPS errors and drifting IMU biases
-- a mistuned filter, and sweeps of the GPS update rate and gyro bias
+- a mistuned filter and a gyro bias sweep
+- a second absolute position reference to remove GPS bias
 - other mission geometries
 - 3D and 6-DOF fixed-wing dynamics
 - PID and LQR controller comparisons
@@ -1200,8 +1337,8 @@ Released under the MIT License. See [LICENSE](LICENSE).
 
 ## Status
 
-**Current stage:** The initial research question is answered for the planar model. The aircraft can steer on its true state, on raw GPS or on an EKF fusing GPS and IMU, with GPS fixes carried over a degraded datalink. A 2,640-flight sweep measures seven kinds of sensor and communication degradation, and a 46-test suite pins the published results to the code.
+**Current stage:** The initial research question is answered for the planar model. The aircraft can steer on its true state, on raw GPS or on an EKF fusing GPS and IMU, with GPS fixes carried over a degraded datalink. A 5,040-flight sweep measures ten kinds of sensor and communication degradation, GPS noise combined with link delay, and three combined scenarios, judging every mission by its true miss distance. A 56-test suite pins the published results to the code.
 
 **Current focus:** Writing up the results.
 
-**Next research question:** How the findings hold under combined degradations, time-correlated sensor errors and other mission geometries.
+**Next research question:** How the findings hold under time-correlated sensor errors, other combinations of degradation and other mission geometries.
